@@ -144,7 +144,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 | Phase | Item | Status |
 |---|---|---|
 | Planning | Problem statement, architecture, decisions | ✅ |
-| 0 | Project scaffold, PWA, Dexie, theme, i18n, deploy workflow | 🟨 (code done; GitHub repo and first deploy pending) |
+| 0 | Project scaffold, PWA, Dexie, theme, i18n, deploy workflow | ✅ live at https://anshbhimani.github.io/OUTFIT-LOCATOR/ |
 | 1 | Locations, add/edit/move saree, browse, zip export | ✅ (tested in a desktop browser; still needs a try on Mom's phone) |
 | 2 | Hybrid NL search, voice (gu-IN/en-IN), EN/GU synonyms, eval set | ⬜ |
 | 3 | Google Drive backup/restore, QR labels | ⬜ |
@@ -156,6 +156,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - What model and age is Mom's Android phone? Check in Phase 2 whether the embedding model runs fast enough.
 
 ## Resolved questions
+- Hosting → repo made **public**, GitHub Pages enabled (D11 stands). The user confirmed after we checked that no personal data is in the repo; only the commit author email is public.
 - Phone platform → Android (D8)
 - Who edits → only Mom (D10)
 - UI language → Gujarati + English (D9)
@@ -165,5 +166,6 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-25:** Answered the open questions: Android, only Mom uses it, Gujarati + English, saree count unknown. Added D8–D10 and moved family sharing to the Backlog.
 - **2026-10-25:** Phase 0: scaffolded Vite + React + TS, added the PWA (manifest, service worker, icons), the Dexie schema, a GU/EN toggle, the large-text theme and the tab shell. Build and lint pass, and the production build serves `sw.js` and the manifest. Added the GitHub Pages workflow (D11) and ran `git init` (no commits yet). Next: create the GitHub repo, push, enable Pages, install on Mom's phone, then Phase 1.
 - **2026-10-25:** Phase 1 built: place tree (room → cupboard/box → shelf, plus outside places), add/edit saree with camera or gallery photos (compressed), tag chips, batch entry, detail view (move, wore today, history, delete), interim search, zip backup/restore. Decisions D13–D15. E2E: 34/34 pass. Next: deploy and let Mom try it, then Phase 2 (smart search).
+- **2026-10-25:** Pushed to github.com/anshbhimani/OUTFIT-LOCATOR on top of its starter README. The first deploy failed (repo private, Pages unavailable on GitHub Free). The user made the repo public and Pages was enabled (`build_type=workflow`); the app is live at https://anshbhimani.github.io/OUTFIT-LOCATOR/. Renamed the app to Outfit Locator / પોશાક શોધક (D18).
 - **2026-10-25:** Palette switched to emerald & gold after a 4-way visual comparison (D17). Tests 33/33, mobile checks clean, contrast verified in light and dark.
 - **2026-10-25:** Visual redesign (D16): heritage theme, bundled Gujarati fonts, lucide icons, bottom-sheet dialogs, toast, place steps, empty state. Fixed the photo object-URL churn. E2E 33/33 and the mobile checks are clean.

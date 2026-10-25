@@ -28,7 +28,7 @@ Full plan: [PLAN.md](./PLAN.md)
 - `src/i18n.tsx`: `LangProvider` / `useLang()` → `{ lang, t, toggle }`
 - `src/data.ts`: **all writes**: `addSaree`, `updateSaree`, `moveSaree`, `markWorn`, `deleteSaree`, `addLocation`, `renameLocation`, `deleteLocation`. Also the path helpers `subtreeIds`, `locationPath`, `pathText`, and `CHILD_KIND`.
 - `src/vocab.ts`: tag vocabulary (colours with swatches, fabrics, designs, occasions) in EN/GU, plus `termLabel`, `sareeName`
-- `src/photos.ts`: `compressPhoto()` (WebP, 1280px; JPEG fallback on Safari)
+- `src/photos.ts`: `compressPhoto()` (JPEG 0.85, ≤1280px)
 - `src/backup.ts`: zip export (Android share sheet, or download) and restore (replaces everything)
 - `src/search/engine.ts`: `buildIndex(items)` and `search(index, query)` → `{ best, more, understood }`. Pure, with no DOM or DB access.
 - `src/search/lexicon.ts`: **the file to edit when Mom's searches miss**: `ALIASES` (tag synonyms in EN / GU / Latin-typed GU), `PHRASES`, `NEIGHBOURS` (related colours), `WORD_GROUPS` (cross-language place/relation words), `STOP_WORDS`, `GU_SUFFIXES`
@@ -39,7 +39,7 @@ Full plan: [PLAN.md](./PLAN.md)
 - `src/ai/photoAi.ts`: `photoAi.enable/resume/disable/embedText`, `usePhotoAi()` state, a background loop that learns every saree photo (stores `Saree.imageEmbeddings`), `photoSimilarities()`
 - `src/components/AiCard.tsx`: opt-in card + progress on Search, `AiSettings` on/off in Places, mobile-data warning
 - `src/search/engine.ts` also exports `photoPrompt()` (query → English for CLIP) and `withPhotoMatches()` (adds the "Found by photo" section); `PHOTO_WORDS` in `lexicon.ts` holds GU/Latin motif words (હાથી → elephant, keri → paisley)
-- `src/hooks.ts`: `useData()` (live sarees + locations), `useObjectUrl()`, last-used location for batch entry
+- `src/hooks.ts`: `useData()` (live sarees + locations), `useLocations()` (places only, lightweight), `useObjectUrl()`, last-used location for batch entry
 - `src/nav.ts` + `src/App.tsx`: stack navigation; each push adds a browser history entry so Android's back button works
 - `src/screens/`: `SearchScreen`, `SareeForm` (add/edit), `SareeDetail`, `PlacesScreen` (+ backup section)
 - `src/components/`: `SareeGrid`/`Photo`, `Chips`, `LocationPicker` (drill-down overlay), `PlaceSteps` (place as stacked Room → Cupboard → Shelf), `Dialog.tsx` (`useDialog()` → bottom-sheet `prompt`/`confirm`/`alert` + `toast`), `icons.tsx` (`KIND_ICON`, `BrandMark`), `places.ts` (add-place sheet)
@@ -54,7 +54,8 @@ Commands: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`, `np
 - Uppercase and letter-spacing go **only under `:lang(en)`**, because tracking breaks Gujarati conjuncts.
 - Show stored photos with `<Photo cacheKey={photoKey(saree, i)}>` so object URLs are reused across live-query refreshes.
 - Mobile-first. Test at a 360px width. Base font ≥ 18px, tap targets ≥ 48px.
-- Compress every photo to WebP at ≤ 1280px on the long edge (about 150 KB) before storing it.
+- Compress every photo to **JPEG 0.85** at ≤ 1280px on the long edge before storing it (D23 replaced WebP).
+- Screens that only need place names use `useLocations()`, not `useData()` (which loads every saree).
 - Any change to a saree's location goes through one `moveSaree()` function, which also writes `History`.
 - Recompute a saree's `textEmbedding` whenever any of its searchable fields or its location changes (already done in `data.ts`; only matters if D20 is revisited).
 - Search changes must keep `npm test` at ≥ 90% top-3, and should stay at 100%.
@@ -161,6 +162,12 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 - *Learning:* a background loop embeds every photo once and re-learns after edits/restores (edits clear `imageEmbeddings`). It skips photos that fail, and won't save if the saree changed meanwhile. About 70–80 ms/photo on a desktop CPU; **expect roughly 0.5–1 s/photo on a phone** (unmeasured), so several minutes one-time for hundreds of sarees.
 - *Dependencies:* model weights come from Hugging Face on first download. If HF ever disappears, already-installed phones keep working; new installs would need the files self-hosted (`env.remoteHost`).
 
+**D23 · 2026-10-25 · Faster adding: background photo prep, save-anytime, JPEG, AI pauses while adding**
+- *Report:* "it takes time to save" on Mom's phone; the user asked whether moving to Vercel would help. **It wouldn't:** saving never touches the network (IndexedDB on the phone), so the host only affects app downloads/updates. We stayed on GitHub Pages.
+- *Measured* (production build, Pixel 7 emulation, CPU ×4, 150 existing sarees, 12 MP / ~4 MB camera JPEGs): the DB write itself took 0.1–0.3 s. The real wait was **photo preparation with Save disabled** (~0.9–1.5 s). WebP encoding alone was ~250 ms vs ~45 ms for JPEG (+~20% size). Photo-AI learning competed for CPU.
+- *Changes:* (1) photos are prepared in the background with a spinner tile, and the form stays usable; (2) **Save works immediately**, showing "Saving…" and waiting for any photo still being prepared; (3) **JPEG 0.85** instead of WebP; (4) `photoAi.holdOff(20 s)` on opening Add, picking a photo and saving, so background learning resumes when she pauses; (5) the Add and Detail screens use `useLocations()` instead of reloading every saree on each save.
+- *Result, same setup, Save tapped right after the photo:* the tile appears at once and saving completes in **0.26–0.46 s** (one 1.3 s case when the AI was mid-photo as adding began), vs ~1.0–1.8 s total before. **Not yet measured on Mom's actual phone.**
+
 **D21 · 2026-10-25 · Voice search through the Web Speech API**
 - *Why:* free, built into Chrome on Android, supports `gu-IN`. The language follows the ગુ/EN switch. Interim results show words as she speaks.
 - *Limits:* Chrome sends audio to Google's recogniser, so **voice needs internet** (typed search works offline). The mic button is hidden on browsers without support. Errors show plain-language messages (mic not allowed / no internet / didn't hear).
@@ -201,6 +208,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-25:** Answered the open questions: Android, only Mom uses it, Gujarati + English, saree count unknown. Added D8–D10 and moved family sharing to the Backlog.
 - **2026-10-25:** Phase 0: scaffolded Vite + React + TS, added the PWA (manifest, service worker, icons), the Dexie schema, a GU/EN toggle, the large-text theme and the tab shell. Build and lint pass, and the production build serves `sw.js` and the manifest. Added the GitHub Pages workflow (D11) and ran `git init` (no commits yet). Next: create the GitHub repo, push, enable Pages, install on Mom's phone, then Phase 1.
 - **2026-10-25:** Phase 1 built: place tree (room → cupboard/box → shelf, plus outside places), add/edit saree with camera or gallery photos (compressed), tag chips, batch entry, detail view (move, wore today, history, delete), interim search, zip backup/restore. Decisions D13–D15. E2E: 34/34 pass. Next: deploy and let Mom try it, then Phase 2 (smart search).
+- **2026-10-25:** Save-speed fix (D23) after Mom reported slow saving; Vercel considered and not needed (saving is local). All suites pass: 33/33 core, 15/15 search, 9/9 photo-AI, 11/11 unit, mobile clean.
 - **2026-10-25:** Photo AI search (D22): MobileCLIP-S0 picked and calibrated on real saree photos (the q8 vision model rejected as near-random), opt-in download about 90 MB, background learning, "Found by photo" section, offline verified. Next: Mom tries Phase 2 + photo AI on her phone; then decide Drive backup (Phase 3).
 - **2026-10-25:** Phase 2: custom search engine (D19), voice search (D21), Vitest eval at 43/43 top-3 and ~14 ms per query at 1,000 sarees. Semantic model deferred (D20). Next: collect Mom's real searches, add misses to the eval, then decide Phase 3 (Drive backup) vs D20.
 - **2026-10-25:** Pushed to github.com/anshbhimani/OUTFIT-LOCATOR on top of its starter README. The first deploy failed (repo private, Pages unavailable on GitHub Free). The user made the repo public and Pages was enabled (`build_type=workflow`); the app is live at https://anshbhimani.github.io/OUTFIT-LOCATOR/. Renamed the app to Outfit Locator / પોશાક શોધક (D18).

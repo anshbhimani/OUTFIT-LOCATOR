@@ -92,12 +92,17 @@ function watchIndex() {
 /** Sarees whose photos couldn't be processed this session (skipped instead of retried forever). */
 const failed = new Set<string>()
 
+/** Learning pauses until this time, so it doesn't compete with Mom adding sarees (D23). */
+let quietUntil = 0
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 /** Learns sarees one at a time until none are left, including ones added while it runs. */
 async function learn() {
   if (indexing) return
   indexing = true
   try {
     while (state.status === 'ready') {
+      while (Date.now() < quietUntil) await sleep(quietUntil - Date.now())
       const saree = await db.sarees
         .filter((s) => s.photos.length > 0 && !s.imageEmbeddings && !failed.has(s.id))
         .first()
@@ -122,6 +127,11 @@ async function learn() {
 }
 
 export const photoAi = {
+  /** Postpone background learning while Mom is busy (adding photos, saving). */
+  holdOff(ms: number) {
+    quietUntil = Math.max(quietUntil, Date.now() + ms)
+  },
+
   enable() {
     try {
       localStorage.setItem(FLAG, 'on')

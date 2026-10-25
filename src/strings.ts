@@ -77,6 +77,7 @@ const en = {
   moved: 'Moved',
   markedWorn: 'Noted',
   processingPhoto: 'Preparing photo…',
+  saving: 'Saving…',
 
   placesTitle: 'Where sarees are kept',
   placesHint: 'Set up rooms, cupboards and shelves once.',
@@ -192,6 +193,7 @@ const gu: typeof en = {
   moved: 'જગ્યા બદલાઈ ગઈ',
   markedWorn: 'નોંધી લીધું',
   processingPhoto: 'ફોટો તૈયાર થાય છે…',
+  saving: 'સાચવી રહ્યા છીએ…',
 
   placesTitle: 'સાડીઓ ક્યાં રાખી છે',
   placesHint: 'રૂમ, કબાટ અને ખાનાં એક વાર ગોઠવી દો.',

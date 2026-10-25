@@ -2,6 +2,13 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useMemo } from 'react'
 import { db, type Location, type Saree } from './db'
 
+/** Just the places, kept live: much lighter than useData() for screens that don't list sarees. */
+export function useLocations() {
+  const locations = useLiveQuery(() => db.locations.toArray(), [])
+  const byId = useMemo(() => new Map((locations ?? []).map((l) => [l.id, l])), [locations])
+  return { loading: locations === undefined, byId }
+}
+
 /** All sarees and locations, kept live. Fine for the ~1,000 sarees we design for. */
 export function useData() {
   const sarees = useLiveQuery(() => db.sarees.orderBy('updatedAt').reverse().toArray(), [])

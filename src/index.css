@@ -1138,3 +1138,21 @@ svg {
   background: linear-gradient(90deg, var(--brand), var(--gold));
   transition: width 0.3s ease;
 }
+
+/* Photo still being prepared: a placeholder tile with a spinner. */
+.photo-preparing {
+  display: grid;
+  place-items: center;
+  height: 140px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--brand);
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,5 +1,6 @@
-import { Camera, ChevronRight, Images, MapPin, X } from 'lucide-react'
+import { Camera, ChevronRight, Images, LoaderCircle, MapPin, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { photoAi } from '../ai/photoAi'
 import { Chips } from '../components/Chips'
 import { useDialog } from '../components/Dialog'
 import { LocationPicker } from '../components/LocationPicker'
@@ -7,13 +8,15 @@ import { PlaceSteps } from '../components/PlaceSteps'
 import { Photo } from '../components/SareeCard'
 import { db } from '../db'
 import { addSaree, updateSaree, type SareeInput } from '../data'
-import { getLastLocation, setLastLocation, useData } from '../hooks'
+import { getLastLocation, setLastLocation, useLocations } from '../hooks'
 import { useLang } from '../i18n'
 import type { Nav } from '../nav'
 import { compressPhoto } from '../photos'
 import { COLORS, FABRICS, OCCASIONS, PATTERNS } from '../vocab'
 
 const MAX_PHOTOS = 4
+/** Keep the photo AI's background learning paused while Mom is adding sarees. */
+const AI_QUIET_MS = 20_000
 
 const empty = (locationId: string): SareeInput => ({
   photos: [],
@@ -30,37 +33,53 @@ const empty = (locationId: string): SareeInput => ({
 export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
   const { t } = useLang()
   const dialog = useDialog()
-  const { byId, loading } = useData()
-  const [form, setForm] = useState<SareeInput | null>(id ? null : empty(getLastLocation() ?? ''))
+  const { byId, loading } = useLocations()
+  const [form, setFormState] = useState<SareeInput | null>(id ? null : empty(getLastLocation() ?? ''))
+  // Mirrors `form` synchronously, so a save waiting on photo preparation sees the finished photos.
+  const formRef = useRef(form)
+  const setForm = (next: SareeInput | null | ((f: SareeInput | null) => SareeInput | null)) => {
+    formRef.current = typeof next === 'function' ? next(formRef.current) : next
+    setFormState(formRef.current)
+  }
   const [picking, setPicking] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [preparing, setPreparing] = useState(0)
+  const pendingRef = useRef(new Set<Promise<unknown>>())
+  const [saving, setSaving] = useState(false)
   const [placeMissing, setPlaceMissing] = useState(false)
   const cameraRef = useRef<HTMLInputElement>(null)
   const galleryRef = useRef<HTMLInputElement>(null)
   const placeRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    photoAi.holdOff(AI_QUIET_MS)
     if (!id) return
     db.sarees.get(id).then((s) => {
       if (s) setForm({ ...s })
     })
+    // setForm is stable in behaviour (writes the ref + state); re-running on its identity is unwanted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   if (!form || loading) return null
   // A remembered place may have been deleted since.
   const locationId = byId.has(form.locationId) ? form.locationId : ''
-  const set = (patch: Partial<SareeInput>) => setForm({ ...form, ...patch })
+  const set = (patch: Partial<SareeInput>) => setForm((f) => (f ? { ...f, ...patch } : f))
 
-  const onFiles = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - form.photos.length)
+  // Each photo is prepared in the background; she can keep filling the form or tap Save meanwhile.
+  const onFiles = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - form.photos.length - preparing)
     e.target.value = ''
-    if (!files.length) return
-    setBusy(true)
-    try {
-      const blobs = await Promise.all(files.map(compressPhoto))
-      setForm((f) => (f ? { ...f, photos: [...f.photos, ...blobs] } : f))
-    } finally {
-      setBusy(false)
+    photoAi.holdOff(AI_QUIET_MS)
+    for (const file of files) {
+      setPreparing((n) => n + 1)
+      const job = compressPhoto(file)
+        .then((blob) => setForm((f) => (f ? { ...f, photos: [...f.photos, blob] } : f)))
+        .catch(() => undefined)
+        .finally(() => {
+          pendingRef.current.delete(job)
+          setPreparing((n) => n - 1)
+        })
+      pendingRef.current.add(job)
     }
   }
 
@@ -70,13 +89,16 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
       placeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
-    setBusy(true)
+    photoAi.holdOff(AI_QUIET_MS)
+    setSaving(true)
     try {
+      await Promise.all(pendingRef.current) // finish any photo still being prepared
+      const current = formRef.current!
       const input: SareeInput = {
-        ...form,
+        ...current,
         locationId,
-        title: form.title?.trim() || undefined,
-        notes: form.notes?.trim() || undefined,
+        title: current.title?.trim() || undefined,
+        notes: current.notes?.trim() || undefined,
       }
       setLastLocation(locationId)
       if (id) {
@@ -89,11 +111,12 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
         window.scrollTo({ top: 0, behavior: 'smooth' })
       }
     } finally {
-      setBusy(false)
+      setSaving(false)
     }
   }
 
-  const canAddPhoto = form.photos.length < MAX_PHOTOS
+  const photoCount = form.photos.length + preparing
+  const canAddPhoto = photoCount < MAX_PHOTOS
 
   return (
     <section className="form">
@@ -101,15 +124,15 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
 
       <div className="card">
         <h2 className="card-title">{t.photos}</h2>
-        {form.photos.length === 0 ? (
+        {photoCount === 0 ? (
           <>
-            <button type="button" className="photo-cta" onClick={() => cameraRef.current?.click()} disabled={busy}>
+            <button type="button" className="photo-cta" onClick={() => cameraRef.current?.click()}>
               <span className="photo-cta-icon">
                 <Camera size={34} aria-hidden />
               </span>
-              <span>{busy ? t.processingPhoto : t.takePhoto}</span>
+              <span>{t.takePhoto}</span>
             </button>
-            <button type="button" className="btn btn-quiet wide" onClick={() => galleryRef.current?.click()} disabled={busy}>
+            <button type="button" className="btn btn-quiet wide" onClick={() => galleryRef.current?.click()}>
               <Images size={22} aria-hidden />
               {t.fromGallery}
             </button>
@@ -130,18 +153,23 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
                   </button>
                 </div>
               ))}
+              {Array.from({ length: preparing }, (_, i) => (
+                <div className="photo-thumb photo-preparing" key={`p${i}`} aria-label={t.processingPhoto}>
+                  <LoaderCircle size={28} className="spin" aria-hidden />
+                </div>
+              ))}
               {canAddPhoto && (
                 <div className="photo-add">
-                  <button type="button" onClick={() => cameraRef.current?.click()} disabled={busy} aria-label={t.takePhoto}>
+                  <button type="button" onClick={() => cameraRef.current?.click()} aria-label={t.takePhoto}>
                     <Camera size={26} aria-hidden />
                   </button>
-                  <button type="button" onClick={() => galleryRef.current?.click()} disabled={busy} aria-label={t.fromGallery}>
+                  <button type="button" onClick={() => galleryRef.current?.click()} aria-label={t.fromGallery}>
                     <Images size={26} aria-hidden />
                   </button>
                 </div>
               )}
             </div>
-            <p className="hint">{busy ? t.processingPhoto : t.photoHint}</p>
+            <p className="hint">{preparing ? t.processingPhoto : t.photoHint}</p>
           </>
         )}
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onFiles} />
@@ -208,12 +236,13 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
 
       <div className="save-bar">
         {id && (
-          <button type="button" className="btn btn-quiet" onClick={nav.back}>
+          <button type="button" className="btn btn-quiet" onClick={nav.back} disabled={saving}>
             {t.cancel}
           </button>
         )}
-        <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
-          {t.save}
+        <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving && <LoaderCircle size={22} className="spin" aria-hidden />}
+          {saving ? t.saving : t.save}
         </button>
       </div>
 

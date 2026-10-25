@@ -7,7 +7,7 @@ import { PlaceSteps } from '../components/PlaceSteps'
 import { Photo } from '../components/SareeCard'
 import { db } from '../db'
 import { deleteSaree, markWorn, moveSaree, pathText } from '../data'
-import { photoKey, useData } from '../hooks'
+import { photoKey, useLocations } from '../hooks'
 import { useLang } from '../i18n'
 import type { Nav } from '../nav'
 import { sareeName, termLabel } from '../vocab'
@@ -15,7 +15,7 @@ import { sareeName, termLabel } from '../vocab'
 export function SareeDetail({ id, nav }: { id: string; nav: Nav }) {
   const { t, lang } = useLang()
   const dialog = useDialog()
-  const { byId } = useData()
+  const { byId } = useLocations()
   const saree = useLiveQuery(() => db.sarees.get(id), [id])
   const history = useLiveQuery(() => db.history.where('sareeId').equals(id).reverse().sortBy('at'), [id])
   const [moving, setMoving] = useState(false)

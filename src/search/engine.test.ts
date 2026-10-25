@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildIndex, search, type SearchItem } from './engine'
+import { buildIndex, photoPrompt, search, withPhotoMatches, type SearchItem } from './engine'
 import { phonetic, skeleton, transliterate } from './translit'
 
 // A realistic wardrobe: mixed Gujarati/English place names, as Mom would type them.
@@ -146,5 +146,29 @@ describe('search', () => {
     const perQuery = (performance.now() - start) / EVAL.length
     console.log(`avg query time at 1,000 sarees: ${perQuery.toFixed(1)} ms`)
     expect(perQuery).toBeLessThan(50)
+  })
+})
+
+describe('photo AI helpers', () => {
+  it('translates tags and Gujarati motif words to English, drops places', () => {
+    expect(photoPrompt(index, 'લાલ હાથી')).toBe('red elephant')
+    expect(photoPrompt(index, 'peacock border in the bedroom')).toBe('peacock border')
+    expect(photoPrompt(index, 'kalo keri bordar')).toBe('black paisley border')
+    expect(photoPrompt(index, 'ગોદરેજ કબાટ')).toBeNull()
+    expect(photoPrompt(index, 'nani')).toBeNull()
+  })
+
+  it('adds only clearly-matching photos, max 4, after the word matches', () => {
+    const sims = new Map(SAREES.map((x, i) => [x.id, i === 6 ? 0.32 : i === 9 ? 0.31 : 0.2 + (i % 3) * 0.005]))
+    // s7 and s10 clearly stand out by photo; s10 was only a partial word match, so it moves up.
+    const r = withPhotoMatches({ best: ['s1'], more: ['s10', 's2'], understood: [] }, sims)
+    expect(r.photo).toEqual(['s7', 's10'])
+    expect(r.more).toEqual(['s2'])
+    expect(r.best).toEqual(['s1'])
+  })
+
+  it('does nothing until enough photos are indexed', () => {
+    const r = withPhotoMatches({ best: [], more: [], understood: [] }, new Map([['s1', 0.9]]))
+    expect(r.photo).toEqual([])
   })
 })

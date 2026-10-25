@@ -141,3 +141,28 @@ export const WORD_GROUPS: string[][] = [
   ['mami', 'મામી'],
   ['bhabhi', 'ભાભી'],
 ]
+
+/**
+ * Words the photo AI (CLIP, English-only) can use, from Gujarati or Latin-typed Gujarati.
+ * Tag synonyms above are translated automatically; this covers motifs and looks that
+ * aren't tags. Values are English phrases sent to the photo model.
+ */
+export const PHOTO_WORDS: Record<string, string> = {
+  hathi: 'elephant', હાથી: 'elephant',
+  popat: 'parrot', પોપટ: 'parrot',
+  keri: 'paisley', કેરી: 'paisley', kairi: 'paisley',
+  tapka: 'small dots', ટપકાં: 'small dots', bindi: 'small dots',
+  kinar: 'border', કિનાર: 'border', બોર્ડર: 'border', bordar: 'border',
+  pallu: 'pallu', palav: 'pallu', પાલવ: 'pallu',
+  bhare: 'heavy embellished', ભારે: 'heavy embellished',
+  halki: 'light simple', હલકી: 'light simple', હળવી: 'light simple',
+  chamakdar: 'shiny', ચમકદાર: 'shiny',
+  jaal: 'mesh pattern', જાળ: 'mesh pattern',
+  butti: 'small motifs', બુટ્ટી: 'small motifs', buti: 'small motifs',
+  leheriya: 'wave pattern', લહેરિયું: 'wave pattern', lahariya: 'wave pattern',
+  gharchola: 'gharchola grid', ઘરચોળું: 'gharchola grid',
+  chundadi: 'chunri dots', ચૂંદડી: 'chunri dots', chunri: 'chunri dots',
+  kamal: 'lotus', કમળ: 'lotus',
+  hans: 'swan', હંસ: 'swan',
+  patti: 'stripes',
+}

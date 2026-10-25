@@ -32,7 +32,25 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Photo-AI code (worker + 27 MB WebAssembly runtime) is only fetched once Mom turns the
+        // feature on, then kept for offline use. Model weights are cached by transformers.js itself.
+        globIgnores: ['**/worker-*.js'],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && /\/assets\/(worker-[^/]+\.js|[^/]+\.wasm)$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ai-runtime',
+              cacheableResponse: { statuses: [200] },
+              // File names are content-hashed; keep the current pair plus one older pair during updates.
+              expiration: { maxEntries: 4 },
+            },
+          },
+        ],
       },
     }),
   ],
+  worker: {
+    format: 'es',
+  },
 })

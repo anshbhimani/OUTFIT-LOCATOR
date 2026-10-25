@@ -1,7 +1,7 @@
 // On-device saree search: synonyms (EN / GU / Latin-typed GU), spelling tolerance, Gujarati↔Latin
 // matching, related colours, and place names. Pure functions, so it can be unit-tested in Node.
 import { COLORS, FABRICS, OCCASIONS, PATTERNS, type Term } from '../vocab'
-import { ALIASES, GU_SUFFIXES, NEIGHBOURS, PHRASES, STOP_WORDS, WORD_GROUPS, type Facet } from './lexicon'
+import { ALIASES, GU_SUFFIXES, NEIGHBOURS, PHOTO_WORDS, PHRASES, STOP_WORDS, WORD_GROUPS, type Facet } from './lexicon'
 import { hasGujarati, phonetic, skeleton } from './translit'
 
 export interface SearchItem {
@@ -253,6 +253,64 @@ export function search(index: SearchIndex, query: string): SearchResult {
   const best = scored.filter((r) => r.strong === qWords.length).map((r) => r.d.item.id)
   const more = scored.filter((r) => r.strong < qWords.length).map((r) => r.d.item.id)
   return { best, more, understood }
+}
+
+// ---------- photo AI ----------
+const photoWord = new Map(Object.entries(PHOTO_WORDS).map(([k, v]) => [phonetic(normalize(k)), v]))
+const englishLabel = (u: Understood) => FACET_TERMS[u.facet].find((t) => t.key === u.key)?.en ?? u.key
+
+/**
+ * The English phrase to send to the photo model, or null if nothing in the query describes
+ * how a saree looks. Tags and motif words are translated; place, relation and other
+ * Gujarati words are dropped (CLIP only understands English, and places aren't visible).
+ */
+export function photoPrompt(index: SearchIndex, query: string): string | null {
+  const placeKeys = new Set(index.flatMap((d) => d.place.map((w) => w.key)))
+  const parts: string[] = []
+  for (const q of parseQuery(query)) {
+    if (q.facet) {
+      parts.push(englishLabel(q.facet).toLowerCase())
+      continue
+    }
+    const raw = q.variants[0].raw
+    const motif = q.variants.map((v) => photoWord.get(v.key)).find(Boolean)
+    if (motif) parts.push(motif)
+    else if (!hasGujarati(raw) && !groupOf.has(q.variants[0].key) && !placeKeys.has(q.variants[0].key)) parts.push(raw)
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
+/** Photo-similarity rules, calibrated on labelled saree photos (see CLAUDE.md D22). */
+const PHOTO_MIN_Z = 1.2
+const PHOTO_NEAR_TOP = 1.0
+const PHOTO_MAX = 4
+const PHOTO_MIN_SAREES = 5
+
+export interface SearchResultWithPhotos extends SearchResult {
+  /** Not found by words, but whose photo clearly matches the description. */
+  photo: string[]
+}
+
+/**
+ * Adds photo-AI matches to a word-search result. `sims` holds each saree's best photo
+ * similarity to the query (sarees without photo embeddings are simply absent).
+ */
+export function withPhotoMatches(result: SearchResult, sims: Map<string, number> | null): SearchResultWithPhotos {
+  if (!sims || sims.size < PHOTO_MIN_SAREES) return { ...result, photo: [] }
+  const values = [...sims.values()]
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length) || 1
+  const z = (id: string) => ((sims.get(id) ?? mean) - mean) / sd
+  const ranked = [...sims.keys()].sort((a, b) => z(b) - z(a))
+  const topZ = z(ranked[0])
+  const strong = ranked.filter((id) => z(id) >= PHOTO_MIN_Z && z(id) >= topZ - PHOTO_NEAR_TOP).slice(0, PHOTO_MAX)
+  const inBest = new Set(result.best)
+  const photo = strong.filter((id) => !inBest.has(id))
+  const photoSet = new Set(photo)
+  // Within the word matches, the photo decides the order ("red saree with gold border": the
+  // red one that visibly has a gold border comes first).
+  const best = [...result.best].sort((a, b) => z(b) - z(a))
+  return { ...result, best, photo, more: result.more.filter((id) => !photoSet.has(id)) }
 }
 
 // ---------- helpers ----------

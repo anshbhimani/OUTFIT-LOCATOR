@@ -1,12 +1,14 @@
-import { Mic, Plus, Search, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Mic, Plus, Search, Sparkles, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { photoAi, photoSimilarities, usePhotoAi } from '../ai/photoAi'
+import { AiCard } from '../components/AiCard'
 import { BrandMark } from '../components/icons'
 import { SareeGrid } from '../components/SareeCard'
 import { locationPath } from '../data'
 import { useData } from '../hooks'
 import { useLang } from '../i18n'
 import type { Nav } from '../nav'
-import { buildIndex, search } from '../search/engine'
+import { buildIndex, photoPrompt, search, withPhotoMatches } from '../search/engine'
 import { useSpeech, type SpeechError } from '../speech'
 import type { Strings } from '../strings'
 import { termLabel } from '../vocab'
@@ -37,10 +39,36 @@ export function SearchScreen({ nav, onAdd }: { nav: Nav; onAdd: () => void }) {
       ),
     [sarees, byId],
   )
-  const result = useMemo(() => search(index, query), [index, query])
+  const words = useMemo(() => search(index, query), [index, query])
+
+  // Photo AI: once she pauses typing, turn the query into English and compare it with every photo.
+  const ai = usePhotoAi()
+  const prompt = useMemo(() => (ai.status === 'ready' ? photoPrompt(index, query) : null), [ai.status, index, query])
+  const [queryVec, setQueryVec] = useState<{ prompt: string; vec: Float32Array } | null>(null)
+  useEffect(() => {
+    if (!prompt) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      photoAi.embedText(prompt).then((vec) => {
+        if (!cancelled && vec) setQueryVec({ prompt, vec })
+      })
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [prompt])
+  const sims = useMemo(
+    () => (queryVec && queryVec.prompt === prompt ? photoSimilarities(queryVec.vec, sarees) : null),
+    [queryVec, prompt, sarees],
+  )
+  const result = useMemo(() => withPhotoMatches(words, sims), [words, sims])
+
   const byIdSaree = useMemo(() => new Map(sarees.map((s) => [s.id, s])), [sarees])
-  const best = result.best.map((id) => byIdSaree.get(id)!).filter(Boolean)
-  const more = result.more.map((id) => byIdSaree.get(id)!).filter(Boolean)
+  const toSarees = (ids: string[]) => ids.map((id) => byIdSaree.get(id)!).filter(Boolean)
+  const best = toSarees(result.best)
+  const photo = toSarees(result.photo)
+  const more = toSarees(result.more)
   const open = (id: string) => nav.push({ name: 'saree', id })
 
   if (loading) return null
@@ -57,7 +85,7 @@ export function SearchScreen({ nav, onAdd }: { nav: Nav; onAdd: () => void }) {
       </section>
     )
 
-  const total = best.length + more.length
+  const total = best.length + photo.length + more.length
 
   return (
     <section>
@@ -101,6 +129,7 @@ export function SearchScreen({ nav, onAdd }: { nav: Nav; onAdd: () => void }) {
       )}
 
       <p className="count">{query ? t.resultCount(total) : t.sareeCount(sarees.length)}</p>
+      {!query && <AiCard />}
 
       {total === 0 ? (
         <div className="empty">
@@ -109,8 +138,18 @@ export function SearchScreen({ nav, onAdd }: { nav: Nav; onAdd: () => void }) {
         </div>
       ) : (
         <>
-          {query && more.length > 0 && best.length > 0 && <h2 className="section-title">{t.bestMatches}</h2>}
+          {query && best.length > 0 && photo.length + more.length > 0 && (
+            <h2 className="section-title">{t.bestMatches}</h2>
+          )}
           <SareeGrid sarees={best} byId={byId} onOpen={open} />
+          {photo.length > 0 && (
+            <>
+              <h2 className="section-title">
+                <Sparkles size={18} aria-hidden /> {t.foundByPhoto}
+              </h2>
+              <SareeGrid sarees={photo} byId={byId} onOpen={open} />
+            </>
+          )}
           {more.length > 0 && (
             <>
               <h2 className="section-title">{t.moreMatches}</h2>

@@ -16,10 +16,9 @@ Full plan: [PLAN.md](./PLAN.md)
 ## Stack
 - React + Vite + TypeScript, `vite-plugin-pwa`
 - IndexedDB via **Dexie**
-- Search: **custom on-device engine** in `src/search/` (D19). Semantic embeddings (transformers.js) are deferred (D20)
+- Search: **custom on-device engine** in `src/search/` (D19), plus opt-in **photo AI**: MobileCLIP-S0 through transformers.js in a Web Worker (D22). Text-meaning embeddings are deferred (D20)
 - Voice: browser Web Speech API (`gu-IN` / `en-IN`)
 - Unit tests: **Vitest** (`npm test`)
-- Image search (Phase 4): CLIP through transformers.js
 - Hosting: Cloudflare Pages or GitHub Pages (static)
 - Backup: Google Drive `appDataFolder` (mom's own account)
 
@@ -36,6 +35,10 @@ Full plan: [PLAN.md](./PLAN.md)
 - `src/search/translit.ts`: Gujarati→Latin transliteration, `phonetic()` keys, consonant `skeleton()`
 - `src/search/engine.test.ts`: evaluation set (20 sarees, 43 real-style queries) plus behaviour tests. **Add every real miss here first, then fix the lexicon.**
 - `src/speech.ts`: `useSpeech(lang, onText)` voice input with friendly error states
+- `src/ai/worker.ts`: loads MobileCLIP-S0 (text q8 + **vision fp32**) and embeds photos and query text off the main thread
+- `src/ai/photoAi.ts`: `photoAi.enable/resume/disable/embedText`, `usePhotoAi()` state, a background loop that learns every saree photo (stores `Saree.imageEmbeddings`), `photoSimilarities()`
+- `src/components/AiCard.tsx`: opt-in card + progress on Search, `AiSettings` on/off in Places, mobile-data warning
+- `src/search/engine.ts` also exports `photoPrompt()` (query → English for CLIP) and `withPhotoMatches()` (adds the "Found by photo" section); `PHOTO_WORDS` in `lexicon.ts` holds GU/Latin motif words (હાથી → elephant, keri → paisley)
 - `src/hooks.ts`: `useData()` (live sarees + locations), `useObjectUrl()`, last-used location for batch entry
 - `src/nav.ts` + `src/App.tsx`: stack navigation; each push adds a browser history entry so Android's back button works
 - `src/screens/`: `SearchScreen`, `SareeForm` (add/edit), `SareeDetail`, `PlacesScreen` (+ backup section)
@@ -146,7 +149,17 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 
 **D20 · 2026-10-25 · Semantic embedding search deferred (was Phase 2 item 4, D3/D4)**
 - *Why:* the word engine already scores 100% on the eval set, so a 120 MB model download, a dependency on Hugging Face hosting and possible slowness on an older phone would buy no measured gain. **Revisit when real queries from Mom miss** and the miss can't be fixed with a lexicon entry (e.g. vague descriptions like "the heavy one I wore in Pune").
+- *Update (D22):* the user chose photo AI instead; text-meaning embeddings stay deferred.
 - *Kept ready:* the `Saree.textEmbedding` field and invalidation on edit/move/rename remain in place.
+
+**D22 · 2026-10-25 · Photo AI search with MobileCLIP-S0, opt-in (user chose "Photo AI" over text-meaning AI)**
+- *Why:* Mom will often snap a photo and skip the tags, and word search can't find untagged sarees. CLIP compares the query text with each photo, so "elephant design" or "હાથી" finds an untagged patola.
+- *Model choice, measured:* on 15 labelled Wikimedia Commons saree photos (local eval only, not in the repo), **MobileCLIP-S0 with the 8-bit vision model was near-random (top-3 7/16)**. The full-precision vision model gets **15/16 top-3, 10/16 top-1** with app-style prompts. WebP compression as stored by the app made no difference. Text model q8 (43 MB) + vision fp32 (45 MB) ≈ **90 MB** download. CLIP ViT-B/32 rejected: ~150 MB+ and slower on phones.
+- *Prompt:* the query's recognised tags and motif words translated to English, filler/place/relation words dropped, **no "saree" appended** (measured: appending it dropped top-3 from 15/16 to 10/16). Gujarati words without an English mapping are dropped, so CLIP is English-only.
+- *Showing results:* a separate **"Found by photo"** section after the word matches, never mixed in. A saree qualifies if its z-score among all sarees is ≥ 1.2, it's within **1.0** of the top z, max 4, and at least 5 sarees have been learned. Calibrated: 0.6 hid real matches for "pink"/"green". Within word matches, photo similarity decides the order.
+- *Opt-in and offline:* a card on Search ("about 90 MB, use Wi-Fi") with a confirm when `navigator.connection.type === 'cellular'`. Model files are cached by transformers.js (Cache Storage); the worker JS and the 27 MB ONNX WASM runtime are **served from our own site** and runtime-cached (`ai-runtime`, CacheFirst, max 4 entries). They're **not precached**, so users who don't turn it on download nothing extra. Verified working fully offline after the download.
+- *Learning:* a background loop embeds every photo once and re-learns after edits/restores (edits clear `imageEmbeddings`). It skips photos that fail, and won't save if the saree changed meanwhile. About 70–80 ms/photo on a desktop CPU; **expect roughly 0.5–1 s/photo on a phone** (unmeasured), so several minutes one-time for hundreds of sarees.
+- *Dependencies:* model weights come from Hugging Face on first download. If HF ever disappears, already-installed phones keep working; new installs would need the files self-hosted (`env.remoteHost`).
 
 **D21 · 2026-10-25 · Voice search through the Web Speech API**
 - *Why:* free, built into Chrome on Android, supports `gu-IN`. The language follows the ગુ/EN switch. Interim results show words as she speaks.
@@ -156,7 +169,8 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 - An end-to-end Playwright script (kept outside the repo, in the session scratchpad) covers: the empty state, the place tree through bottom sheets, adding with photo and place, the missing-place error, batch-keep place, search (EN, GU, notes, place), move + history, last worn, the back button, edit, place counts, delete protection, rename, backup → wipe → restore, and **no native dialogs or console errors**. **33/33 pass** against the dev server on the redesigned UI (twice in a row).
 - Mobile check (Pixel 7 emulation at 320, 360 and 412px, 7 screens each): no horizontal overflow, no controls under 44px, base font 19px. Re-run after the redesign: all clean. It found and fixed a detail photo that pushed the place below the fold (now 42vh) and a gap between the save bar and the tab bar (`--tabbar-h` token).
 - Phase 2 browser check (`search-e2e.js` in the scratchpad): Latin-typed GU, understood chips, best/more sections, Latin ↔ Gujarati place names, notes, the no-result hint, and **voice with a mocked recogniser** (gu-IN/en-IN, transcript fills the box, mic-denied message). 15/15 pass. The main suite is still 33/33.
-- **Not yet verified on a real phone:** real speech recognition in Gujarati, camera capture, share-sheet backup, PWA install, offline mode, speed on an older device.
+- Photo AI (`ai-e2e.js`, against `vite preview` with the **real model**): 15 untagged Commons sarees, opt-in card → download → learning in about 70 s, **9/9 queries find the right saree in "Found by photo" top 3** (incl. "હાથી", "lilo"), place-only queries trigger no photo matches, **works offline after reload**, Places shows status. Unit tests: 11/11 (prompt translation and match merging).
+- **Not yet verified on a real phone:** photo-AI speed and memory on her phone, real speech recognition in Gujarati, camera capture, share-sheet backup, PWA install, offline mode, speed on an older device.
 - TODO: move it into the repo as `e2e/` with `@playwright/test` once the UI settles.
 
 ## Progress
@@ -169,7 +183,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 | 1 | Locations, add/edit/move saree, browse, zip export | ✅ (tested in a desktop browser; still needs a try on Mom's phone) |
 | 2 | Smart search (synonyms, typos, GU↔Latin, related colours, places), voice (gu-IN/en-IN), eval set | ✅ (semantic model deferred, D20; needs real-phone voice test and Mom's real queries) |
 | 3 | Google Drive backup/restore, QR labels | ⬜ |
-| 4 | CLIP photo search and auto-tags, "not worn" view | ⬜ |
+| 4 | CLIP photo search ✅ (D22); auto-suggest tags from photo, "not worn" view | 🟨 |
 | Backlog | Family sharing (see D10) | ⬜ |
 
 ## Open questions
@@ -187,6 +201,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-25:** Answered the open questions: Android, only Mom uses it, Gujarati + English, saree count unknown. Added D8–D10 and moved family sharing to the Backlog.
 - **2026-10-25:** Phase 0: scaffolded Vite + React + TS, added the PWA (manifest, service worker, icons), the Dexie schema, a GU/EN toggle, the large-text theme and the tab shell. Build and lint pass, and the production build serves `sw.js` and the manifest. Added the GitHub Pages workflow (D11) and ran `git init` (no commits yet). Next: create the GitHub repo, push, enable Pages, install on Mom's phone, then Phase 1.
 - **2026-10-25:** Phase 1 built: place tree (room → cupboard/box → shelf, plus outside places), add/edit saree with camera or gallery photos (compressed), tag chips, batch entry, detail view (move, wore today, history, delete), interim search, zip backup/restore. Decisions D13–D15. E2E: 34/34 pass. Next: deploy and let Mom try it, then Phase 2 (smart search).
+- **2026-10-25:** Photo AI search (D22): MobileCLIP-S0 picked and calibrated on real saree photos (the q8 vision model rejected as near-random), opt-in download about 90 MB, background learning, "Found by photo" section, offline verified. Next: Mom tries Phase 2 + photo AI on her phone; then decide Drive backup (Phase 3).
 - **2026-10-25:** Phase 2: custom search engine (D19), voice search (D21), Vitest eval at 43/43 top-3 and ~14 ms per query at 1,000 sarees. Semantic model deferred (D20). Next: collect Mom's real searches, add misses to the eval, then decide Phase 3 (Drive backup) vs D20.
 - **2026-10-25:** Pushed to github.com/anshbhimani/OUTFIT-LOCATOR on top of its starter README. The first deploy failed (repo private, Pages unavailable on GitHub Free). The user made the repo public and Pages was enabled (`build_type=workflow`); the app is live at https://anshbhimani.github.io/OUTFIT-LOCATOR/. Renamed the app to Outfit Locator / પોશાક શોધક (D18).
 - **2026-10-25:** Palette switched to emerald & gold after a 4-way visual comparison (D17). Tests 33/33, mobile checks clean, contrast verified in light and dark.

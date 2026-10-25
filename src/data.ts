@@ -26,8 +26,8 @@ export async function addSaree(input: SareeInput): Promise<string> {
 export async function updateSaree(id: string, input: SareeInput): Promise<void> {
   const { locationId, ...fields } = input
   await db.transaction('rw', db.sarees, db.history, async () => {
-    // textEmbedding: undefined removes it, so Phase 2 knows to recompute.
-    await db.sarees.update(id, { ...fields, updatedAt: new Date(), textEmbedding: undefined })
+    // Setting an embedding to undefined removes it, so the photo AI re-learns this saree.
+    await db.sarees.update(id, { ...fields, updatedAt: new Date(), textEmbedding: undefined, imageEmbeddings: undefined })
     await moveSaree(id, locationId)
   })
 }

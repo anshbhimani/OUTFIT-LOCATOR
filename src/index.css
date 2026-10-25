@@ -1099,3 +1099,42 @@ svg {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* ---------- photo AI ---------- */
+.ai-card {
+  background: linear-gradient(160deg, var(--surface), var(--brand-soft));
+}
+.ai-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--brand);
+  font-weight: 700;
+}
+.ai-card-text {
+  margin: 8px 0 0;
+}
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--brand);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.progress {
+  height: 10px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), var(--gold));
+  transition: width 0.3s ease;
+}

@@ -1,6 +1,7 @@
 import { ChevronRight, Download, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createBackup, lastBackupAt, restoreBackup, saveBackup } from '../backup'
+import { AiSettings } from '../components/AiCard'
 import { useDialog } from '../components/Dialog'
 import { KIND_ICON } from '../components/icons'
 import { addLabel, promptAddPlace } from '../components/places'
@@ -70,6 +71,7 @@ export function PlacesScreen({ locationId, nav }: { locationId: string | null; n
         {addButton('away', null)}
 
         <BackupSection />
+        <AiSettings />
       </section>
     )
   }

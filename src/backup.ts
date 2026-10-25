@@ -5,7 +5,7 @@ import { db, type History, type Location, type Saree } from './db'
 const FORMAT_VERSION = 1
 const LAST_BACKUP_KEY = 'lastBackupAt'
 
-type SareeRecord = Omit<Saree, 'photos' | 'textEmbedding' | 'imageEmbedding'> & { photos: string[] }
+type SareeRecord = Omit<Saree, 'photos' | 'textEmbedding' | 'imageEmbeddings'> & { photos: string[] }
 interface BackupFile {
   version: number
   exportedAt: string
@@ -27,7 +27,7 @@ export async function createBackup(): Promise<File> {
   const files: Record<string, Uint8Array> = {}
 
   const records: SareeRecord[] = []
-  for (const { photos, textEmbedding: _t, imageEmbedding: _i, ...rest } of sarees) {
+  for (const { photos, textEmbedding: _t, imageEmbeddings: _i, ...rest } of sarees) {
     const names: string[] = []
     for (const [i, photo] of photos.entries()) {
       const name = `photos/${rest.id}-${i}.${extFor(photo.type)}`

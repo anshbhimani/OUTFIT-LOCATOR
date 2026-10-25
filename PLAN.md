@@ -140,7 +140,8 @@ With 100–1,000 sarees, a brute-force vector comparison takes under 10 ms, so n
 - [ ] QR labels: generate a printable PDF sheet for each storage unit
 
 ### Phase 4: Smart extras
-- [ ] CLIP image embeddings → search by photo, plus zero-shot colour/fabric suggestions when adding a saree
+- [x] CLIP photo search (MobileCLIP-S0, opt-in, offline): text query finds untagged sarees by how they look (CLAUDE.md D22)
+- [ ] Colour/fabric suggestions from the photo when adding a saree
 - [ ] "Not worn in 2+ years" view
 
 ### Backlog

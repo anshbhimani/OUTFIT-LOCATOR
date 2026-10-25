@@ -24,7 +24,8 @@ export interface Saree {
   createdAt: Date
   updatedAt: Date
   textEmbedding?: Float32Array
-  imageEmbedding?: Float32Array
+  /** Photo-AI fingerprint per photo (same order as `photos`); recomputed when photos change. Not indexed. */
+  imageEmbeddings?: Float32Array[]
 }
 
 export interface History {

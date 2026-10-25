@@ -1,5 +1,6 @@
 import { ChevronLeft, House, Plus, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { photoAi } from './ai/photoAi'
 import { BrandMark } from './components/icons'
 import { requestPersistentStorage } from './db'
 import { useLang } from './i18n'
@@ -23,6 +24,7 @@ export default function App() {
 
   useEffect(() => {
     requestPersistentStorage().then(setPersisted)
+    photoAi.resume() // reloads the photo AI from the browser cache if Mom turned it on
   }, [])
 
   // Each pushed screen gets a browser history entry so Android's back button goes back one screen.

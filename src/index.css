@@ -1029,3 +1029,73 @@ svg {
 .title-row .screen-title {
   font-size: clamp(1.35rem, 6vw, 1.65rem);
 }
+
+/* ---------- smart search ---------- */
+.search-box {
+  padding-right: 6px;
+}
+.search-clear,
+.mic-btn {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.mic-btn {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.mic-btn.on {
+  background: var(--brand);
+  color: var(--brand-ink);
+  animation: mic-pulse 1.2s ease-out infinite;
+}
+.search-box.listening {
+  box-shadow: var(--shadow-md), 0 0 0 2px var(--brand);
+}
+@keyframes mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+.voice-error {
+  margin: 10px 4px 0;
+  color: var(--warn);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.understood {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.understood .chip.static {
+  padding: 2px 12px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.88rem;
+}
+.empty p {
+  margin: 0;
+}
+.empty .hint {
+  margin-top: 6px;
+}
+/* We render our own large clear button; hide the browser's small one. */
+.search-box input::-webkit-search-cancel-button,
+.search-box input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

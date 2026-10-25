@@ -16,8 +16,9 @@ Full plan: [PLAN.md](./PLAN.md)
 ## Stack
 - React + Vite + TypeScript, `vite-plugin-pwa`
 - IndexedDB via **Dexie**
-- Keyword search: **MiniSearch**
-- Semantic search: **transformers.js** (`Xenova/multilingual-e5-small`, quantized), runs in the browser
+- Search: **custom on-device engine** in `src/search/` (D19). Semantic embeddings (transformers.js) are deferred (D20)
+- Voice: browser Web Speech API (`gu-IN` / `en-IN`)
+- Unit tests: **Vitest** (`npm test`)
 - Image search (Phase 4): CLIP through transformers.js
 - Hosting: Cloudflare Pages or GitHub Pages (static)
 - Backup: Google Drive `appDataFolder` (mom's own account)
@@ -30,7 +31,11 @@ Full plan: [PLAN.md](./PLAN.md)
 - `src/vocab.ts`: tag vocabulary (colours with swatches, fabrics, designs, occasions) in EN/GU, plus `termLabel`, `sareeName`
 - `src/photos.ts`: `compressPhoto()` (WebP, 1280px; JPEG fallback on Safari)
 - `src/backup.ts`: zip export (Android share sheet, or download) and restore (replaces everything)
-- `src/simpleSearch.ts`: interim Phase 1 search (every query word must appear in the saree's text). **Phase 2 replaces this.**
+- `src/search/engine.ts`: `buildIndex(items)` and `search(index, query)` → `{ best, more, understood }`. Pure, with no DOM or DB access.
+- `src/search/lexicon.ts`: **the file to edit when Mom's searches miss**: `ALIASES` (tag synonyms in EN / GU / Latin-typed GU), `PHRASES`, `NEIGHBOURS` (related colours), `WORD_GROUPS` (cross-language place/relation words), `STOP_WORDS`, `GU_SUFFIXES`
+- `src/search/translit.ts`: Gujarati→Latin transliteration, `phonetic()` keys, consonant `skeleton()`
+- `src/search/engine.test.ts`: evaluation set (20 sarees, 43 real-style queries) plus behaviour tests. **Add every real miss here first, then fix the lexicon.**
+- `src/speech.ts`: `useSpeech(lang, onText)` voice input with friendly error states
 - `src/hooks.ts`: `useData()` (live sarees + locations), `useObjectUrl()`, last-used location for batch entry
 - `src/nav.ts` + `src/App.tsx`: stack navigation; each push adds a browser history entry so Android's back button works
 - `src/screens/`: `SearchScreen`, `SareeForm` (add/edit), `SareeDetail`, `PlacesScreen` (+ backup section)
@@ -39,7 +44,7 @@ Full plan: [PLAN.md](./PLAN.md)
 - `vite.config.ts`: PWA manifest and service worker; `BASE_PATH` env for sub-path hosting
 - `public/`: icons (`icon.svg` is the source; PNGs were generated with ImageMagick)
 
-Commands: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`.
+Commands: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`, `npm test`.
 
 ## Conventions
 - **Design system (D16):** use the tokens in `index.css` (`--brand`, `--gold`, `--surface-2`, `--shadow-*`, `--radius*`) and **lucide-react** icons only. Never use emoji in the UI, never call native `window.prompt/confirm/alert` (use `useDialog()`), and use `.card`, `.row`, `.btn-primary/-quiet/-dashed` instead of one-off styles.
@@ -48,7 +53,8 @@ Commands: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`.
 - Mobile-first. Test at a 360px width. Base font ≥ 18px, tap targets ≥ 48px.
 - Compress every photo to WebP at ≤ 1280px on the long edge (about 150 KB) before storing it.
 - Any change to a saree's location goes through one `moveSaree()` function, which also writes `History`.
-- Recompute a saree's `textEmbedding` whenever any of its searchable fields or its location changes.
+- Recompute a saree's `textEmbedding` whenever any of its searchable fields or its location changes (already done in `data.ts`; only matters if D20 is revisited).
+- Search changes must keep `npm test` at ≥ 90% top-3, and should stay at 100%.
 - UI strings live in one file, ready for Hindi/Gujarati later.
 - No backend code. If a feature seems to need a server, stop and log a decision first.
 
@@ -132,10 +138,25 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 - *What changed:* the UI app name (EN/GU), page title, PWA manifest (`short_name` is Gujarati because it's the label under Mom's home-screen icon) and the backup file name (`outfit-backup-*.zip`).
 - *Deliberately unchanged:* the IndexedDB name `saree-locator`, because renaming it would make the app open empty. The folder, package and repo names are also unchanged. The rest of the UI still says "saree" (e.g. "Add a saree"); widening it to other clothing would be a separate decision.
 
+**D19 · 2026-10-25 · Custom search engine instead of MiniSearch**
+- *Why:* the hard parts of Mom's searches are specific to this app. Gujarati script ↔ Latin letters ("bedroom" ↔ "બેડરૂમ"), gendered/inflected Gujarati (પીળો/પીળી, માળિયું→માળિયામાં), "સાડી" (saree) vs "સાદી" (plain) sounding alike, related colours, and cross-language place words (shelf ↔ ખાનું). A generic full-text library handles none of these. With ≤ 1,000 sarees, a scan per query takes about 14 ms, so no index structure is needed.
+- *How it scores:* each query word gets its best match across tag facets (3), title (2.5), place (2), tag labels (2), notes (1.5). Match levels: exact/phonetic 1, prefix/stem 0.75, consonant skeleton or 1–2 typos 0.6. A related colour gives 1.2. **Best** = every word matched strongly (≥ 1.5); **Other close matches** = the rest. Recognised tags are shown as "Looking for: …" chips so Mom sees what the app understood.
+- *Result:* 43/43 top-3 on the eval set. A probe of 21 extra queries found no wrong saree in "best". Two gaps the probe found ("border", "shelf") were fixed and added to the eval.
+- *Rejected:* MiniSearch (installed then removed); keeping the Phase 1 substring search.
+
+**D20 · 2026-10-25 · Semantic embedding search deferred (was Phase 2 item 4, D3/D4)**
+- *Why:* the word engine already scores 100% on the eval set, so a 120 MB model download, a dependency on Hugging Face hosting and possible slowness on an older phone would buy no measured gain. **Revisit when real queries from Mom miss** and the miss can't be fixed with a lexicon entry (e.g. vague descriptions like "the heavy one I wore in Pune").
+- *Kept ready:* the `Saree.textEmbedding` field and invalidation on edit/move/rename remain in place.
+
+**D21 · 2026-10-25 · Voice search through the Web Speech API**
+- *Why:* free, built into Chrome on Android, supports `gu-IN`. The language follows the ગુ/EN switch. Interim results show words as she speaks.
+- *Limits:* Chrome sends audio to Google's recogniser, so **voice needs internet** (typed search works offline). The mic button is hidden on browsers without support. Errors show plain-language messages (mic not allowed / no internet / didn't hear).
+
 ## Testing
 - An end-to-end Playwright script (kept outside the repo, in the session scratchpad) covers: the empty state, the place tree through bottom sheets, adding with photo and place, the missing-place error, batch-keep place, search (EN, GU, notes, place), move + history, last worn, the back button, edit, place counts, delete protection, rename, backup → wipe → restore, and **no native dialogs or console errors**. **33/33 pass** against the dev server on the redesigned UI (twice in a row).
 - Mobile check (Pixel 7 emulation at 320, 360 and 412px, 7 screens each): no horizontal overflow, no controls under 44px, base font 19px. Re-run after the redesign: all clean. It found and fixed a detail photo that pushed the place below the fold (now 42vh) and a gap between the save bar and the tab bar (`--tabbar-h` token).
-- **Not yet verified on a real phone:** camera capture, share-sheet backup, PWA install, offline mode, speed on an older device.
+- Phase 2 browser check (`search-e2e.js` in the scratchpad): Latin-typed GU, understood chips, best/more sections, Latin ↔ Gujarati place names, notes, the no-result hint, and **voice with a mocked recogniser** (gu-IN/en-IN, transcript fills the box, mic-denied message). 15/15 pass. The main suite is still 33/33.
+- **Not yet verified on a real phone:** real speech recognition in Gujarati, camera capture, share-sheet backup, PWA install, offline mode, speed on an older device.
 - TODO: move it into the repo as `e2e/` with `@playwright/test` once the UI settles.
 
 ## Progress
@@ -146,7 +167,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 | Planning | Problem statement, architecture, decisions | ✅ |
 | 0 | Project scaffold, PWA, Dexie, theme, i18n, deploy workflow | ✅ live at https://anshbhimani.github.io/OUTFIT-LOCATOR/ |
 | 1 | Locations, add/edit/move saree, browse, zip export | ✅ (tested in a desktop browser; still needs a try on Mom's phone) |
-| 2 | Hybrid NL search, voice (gu-IN/en-IN), EN/GU synonyms, eval set | ⬜ |
+| 2 | Smart search (synonyms, typos, GU↔Latin, related colours, places), voice (gu-IN/en-IN), eval set | ✅ (semantic model deferred, D20; needs real-phone voice test and Mom's real queries) |
 | 3 | Google Drive backup/restore, QR labels | ⬜ |
 | 4 | CLIP photo search and auto-tags, "not worn" view | ⬜ |
 | Backlog | Family sharing (see D10) | ⬜ |
@@ -166,6 +187,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-25:** Answered the open questions: Android, only Mom uses it, Gujarati + English, saree count unknown. Added D8–D10 and moved family sharing to the Backlog.
 - **2026-10-25:** Phase 0: scaffolded Vite + React + TS, added the PWA (manifest, service worker, icons), the Dexie schema, a GU/EN toggle, the large-text theme and the tab shell. Build and lint pass, and the production build serves `sw.js` and the manifest. Added the GitHub Pages workflow (D11) and ran `git init` (no commits yet). Next: create the GitHub repo, push, enable Pages, install on Mom's phone, then Phase 1.
 - **2026-10-25:** Phase 1 built: place tree (room → cupboard/box → shelf, plus outside places), add/edit saree with camera or gallery photos (compressed), tag chips, batch entry, detail view (move, wore today, history, delete), interim search, zip backup/restore. Decisions D13–D15. E2E: 34/34 pass. Next: deploy and let Mom try it, then Phase 2 (smart search).
+- **2026-10-25:** Phase 2: custom search engine (D19), voice search (D21), Vitest eval at 43/43 top-3 and ~14 ms per query at 1,000 sarees. Semantic model deferred (D20). Next: collect Mom's real searches, add misses to the eval, then decide Phase 3 (Drive backup) vs D20.
 - **2026-10-25:** Pushed to github.com/anshbhimani/OUTFIT-LOCATOR on top of its starter README. The first deploy failed (repo private, Pages unavailable on GitHub Free). The user made the repo public and Pages was enabled (`build_type=workflow`); the app is live at https://anshbhimani.github.io/OUTFIT-LOCATOR/. Renamed the app to Outfit Locator / પોશાક શોધક (D18).
 - **2026-10-25:** Palette switched to emerald & gold after a 4-way visual comparison (D17). Tests 33/33, mobile checks clean, contrast verified in light and dark.
 - **2026-10-25:** Visual redesign (D16): heritage theme, bundled Gujarati fonts, lucide icons, bottom-sheet dialogs, toast, place steps, empty state. Fixed the photo object-URL churn. E2E 33/33 and the mobile checks are clean.

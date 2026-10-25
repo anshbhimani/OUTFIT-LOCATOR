@@ -127,13 +127,12 @@ With 100–1,000 sarees, a brute-force vector comparison takes under 10 ms, so n
 - [x] Interim plain-word search (replaced in Phase 2)
 
 ### Phase 2: Search
-- [ ] MiniSearch keyword index
-- [ ] transformers.js embeddings, model downloaded once and cached
-- [ ] Query parser plus a synonym dictionary (EN/GU, Gujarati script and Gujarati in English letters)
-- [ ] Benchmark embedding speed on Mom's phone; fall back to keyword search if it's too slow
-- [ ] Hybrid ranking and results UI
-- [ ] Voice input
-- [ ] An evaluation set of about 30 real queries from mom → measure whether the right saree is in the top 3
+- [x] Search engine: custom, on device (replaced MiniSearch, see CLAUDE.md D19)
+- [x] Synonym dictionary (EN/GU, Gujarati script and Gujarati in English letters) plus related colours and cross-language place words
+- [x] Voice input (gu-IN / en-IN)
+- [x] Evaluation set: 20 sarees × 43 queries, 100% top-3, ~14 ms per query at 1,000 sarees
+- [ ] Mom's own ~30 real queries added to the eval
+- [ ] ~~transformers.js embeddings~~: deferred until real misses justify it (D20)
 
 ### Phase 3: Backup and multi-device
 - [ ] Google Drive sync (appDataFolder, OAuth on the client side only)

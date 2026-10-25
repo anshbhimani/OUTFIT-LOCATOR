@@ -3,56 +3,76 @@
 This file holds context for Claude and anyone else working on this repo. **Keep it updated.** When a decision is made, add it to the Decision Log. When a task is finished, update Progress.
 
 ## Project in one line
-A free-for-life, offline-first phone app (PWA) where Mom catalogues every saree in the house with a photo and its storage location, then finds any of them with natural-language or voice search.
+A free-for-life phone app (PWA, hosted on Vercel) where Mom and the family catalogue every saree in the house with a photo and its storage location, then find any of them with natural-language, voice or photo search. Data lives in the cloud behind a login (D24).
+
+Live: https://outfit-locator.vercel.app (deploys on every push to `main`).
 
 Full plan: [PLAN.md](./PLAN.md)
 
 ## Non-negotiable constraints
 1. **Free for life.** No paid services, no trials, no free tiers that pause or delete data when idle, and no credit card required anywhere.
 2. **The primary user is non-technical.** Large text, big tap targets, photos first, as few required fields as possible.
-3. **Her data is never lost.** Every storage change has to be recoverable through export or backup.
-4. **Offline first.** Everything except backup sync works with no network.
+3. **Her data is never lost.** The cloud (Neon + private Blob) is the main copy; a zip backup can be downloaded any time.
+4. ~~Offline first~~: **dropped by the user (D24)**. The app needs internet for data; the app shell still loads offline and shows a "no internet" screen.
+5. **Private.** Every data and photo request needs a logged-in user; photos are in a private Blob store.
 
 ## Stack
-- React + Vite + TypeScript, `vite-plugin-pwa`
-- IndexedDB via **Dexie**
+- React + Vite + TypeScript, `vite-plugin-pwa` (frontend)
+- **Vercel Functions** in `api/` (Node, Web `Request`/`Response` handlers), region `sin1`
+- **Neon Postgres** (Vercel Marketplace, free plan, Singapore), via `@neondatabase/serverless`
+- **Vercel Blob**, private store `outfit-photos` (Singapore), for photos
+- Login: username + scrypt password hash, HMAC-signed cookie valid for 10 years (D24)
 - Search: **custom on-device engine** in `src/search/` (D19), plus opt-in **photo AI**: MobileCLIP-S0 through transformers.js in a Web Worker (D22). Text-meaning embeddings are deferred (D20)
 - Voice: browser Web Speech API (`gu-IN` / `en-IN`)
 - Unit tests: **Vitest** (`npm test`)
-- Hosting: Cloudflare Pages or GitHub Pages (static)
-- Backup: Google Drive `appDataFolder` (mom's own account)
+- Hosting: **Vercel** (project `outfit-locator`, Git-connected to `anshbhimani/OUTFIT-LOCATOR`). GitHub Pages retired.
+- Backup: the cloud is the main copy; zip download/restore in Places. (Google Drive backup, D5, no longer needed.)
 
 ## Code map
-- `src/db.ts`: Dexie schema (`Saree`, `Location`, `History`), `newId()`, `requestPersistentStorage()`. **Never edit a published `db.version(n)`; add a new version with an upgrade.**
+- `api/_lib/db.ts`: Neon client (`getSql()`) and the **idempotent schema** (`ensureSchema()`: tables users, locations, sarees, photos, history; unique name indexes). Change the schema by appending `ALTER … IF NOT EXISTS` statements; never drop data.
+- `api/_lib/auth.ts`: password hashing, session cookie sign/verify, `currentUser(req)`, `json()` helper
+- `api/auth.ts`: GET current user / POST login (5 failures → 15 min lock) / POST logout
+- `api/data.ts`: GET all places + sarees (`?embeddings=1` adds photo-AI fingerprints); POST `{op}`: addLocation, renameLocation, deleteLocation, saveSaree (create/update incl. photos, writes history, 409 `duplicate_name`), moveSaree, markWorn, deleteSaree, history, discardPhotos, setEmbedding
+- `api/photo.ts`: POST JPEG → private blob `photos/<uuid>.jpg`; GET `?p=` streams it to logged-in users (cached immutable)
+- `scripts/create-user.ts` (`npm run create-user -- <username> "<Display name>"`): create a login or reset a password (signs out everywhere). **The password is echoed while typing; don't paste that output anywhere.**
+- `scripts/import-photos.ts` (`npm run import-photos -- <folder> "Room › Unit" <username> [--dry-run]`): bulk import, one photo = one saree, remembered in `<folder>/.imported.json`
+- `scripts/ai-tag.ts` (`npm run ai-tag -- [--dry-run] [--all]`): photo-AI colour tags plus fingerprints for untagged sarees (see D25 for its limits)
+- `src/types.ts`: shared shapes (`Saree` with `title` = Gujarati name, `titleEn` = English name; `StoredPhoto`; `photoUrl()`)
+- `src/store.ts`: in-memory copy of the family's data (`useStore()`), `api()` fetch helper (401 → login screen), `loadAll`, `login`, `logout`
 - `src/strings.ts`: all UI text, EN + GU (the `gu` object is typed against `en`, so a missing key fails the build)
 - `src/i18n.tsx`: `LangProvider` / `useLang()` → `{ lang, t, toggle }`
-- `src/data.ts`: **all writes**: `addSaree`, `updateSaree`, `moveSaree`, `markWorn`, `deleteSaree`, `addLocation`, `renameLocation`, `deleteLocation`. Also the path helpers `subtreeIds`, `locationPath`, `pathText`, and `CHILD_KIND`.
+- `src/data.ts`: **all writes** (API call, then patch the store); photos upload as soon as they're prepared (`startUpload`); a removed photo's upload is discarded (`discardUpload`): `addSaree`, `updateSaree`, `moveSaree`, `markWorn`, `deleteSaree`, `addLocation`, `renameLocation`, `deleteLocation`. Also the path helpers `subtreeIds`, `locationPath`, `pathText`, and `CHILD_KIND`.
 - `src/vocab.ts`: tag vocabulary (colours with swatches, fabrics, designs, occasions) in EN/GU, plus `termLabel`, `sareeName`
 - `src/photos.ts`: `compressPhoto()` (JPEG 0.85, ≤1280px)
-- `src/backup.ts`: zip export (Android share sheet, or download) and restore (replaces everything)
+- `src/backup.ts`: zip export from the cloud (share sheet or download) and restore (**adds/updates by id, deletes nothing**; also imports old on-phone app backups)
 - `src/search/engine.ts`: `buildIndex(items)` and `search(index, query)` → `{ best, more, understood }`. Pure, with no DOM or DB access.
 - `src/search/lexicon.ts`: **the file to edit when Mom's searches miss**: `ALIASES` (tag synonyms in EN / GU / Latin-typed GU), `PHRASES`, `NEIGHBOURS` (related colours), `WORD_GROUPS` (cross-language place/relation words), `STOP_WORDS`, `GU_SUFFIXES`
 - `src/search/translit.ts`: Gujarati→Latin transliteration, `phonetic()` keys, consonant `skeleton()`
 - `src/search/engine.test.ts`: evaluation set (20 sarees, 43 real-style queries) plus behaviour tests. **Add every real miss here first, then fix the lexicon.**
 - `src/speech.ts`: `useSpeech(lang, onText)` voice input with friendly error states
 - `src/ai/worker.ts`: loads MobileCLIP-S0 (text q8 + **vision fp32**) and embeds photos and query text off the main thread
-- `src/ai/photoAi.ts`: `photoAi.enable/resume/disable/embedText`, `usePhotoAi()` state, a background loop that learns every saree photo (stores `Saree.imageEmbeddings`), `photoSimilarities()`
+- `src/ai/photoAi.ts`: `photoAi.enable/resume/disable/embedText`, `usePhotoAi()` state, a background loop that learns unlearned photos and saves fingerprints to the cloud (`setPhotoEmbedding`), shared by the family, `photoSimilarities()`
 - `src/components/AiCard.tsx`: opt-in card + progress on Search, `AiSettings` on/off in Places, mobile-data warning
 - `src/search/engine.ts` also exports `photoPrompt()` (query → English for CLIP) and `withPhotoMatches()` (adds the "Found by photo" section); `PHOTO_WORDS` in `lexicon.ts` holds GU/Latin motif words (હાથી → elephant, keri → paisley)
-- `src/hooks.ts`: `useData()` (live sarees + locations), `useLocations()` (places only, lightweight), `useObjectUrl()`, last-used location for batch entry
+- `src/hooks.ts`: `useData()` / `useLocations()` (read from the store), `useObjectUrl()` for unsaved photo previews, last-used location for batch entry
 - `src/nav.ts` + `src/App.tsx`: stack navigation; each push adds a browser history entry so Android's back button works
-- `src/screens/`: `SearchScreen`, `SareeForm` (add/edit), `SareeDetail`, `PlacesScreen` (+ backup section)
+- `src/screens/`: `LoginScreen`, `SearchScreen`, `SareeForm` (add/edit, two name fields), `SareeDetail`, `PlacesScreen` (+ backup, photo AI, account/sign-out)
 - `src/components/`: `SareeGrid`/`Photo`, `Chips`, `LocationPicker` (drill-down overlay), `PlaceSteps` (place as stacked Room → Cupboard → Shelf), `Dialog.tsx` (`useDialog()` → bottom-sheet `prompt`/`confirm`/`alert` + `toast`), `icons.tsx` (`KIND_ICON`, `BrandMark`), `places.ts` (add-place sheet)
 - `src/index.css`: design tokens (colours, shadows, radii, fonts), light/dark, all component styles
-- `vite.config.ts`: PWA manifest and service worker; `BASE_PATH` env for sub-path hosting
+- `vite.config.ts`: PWA manifest and service worker (`/api/*` never answered from cache)
+- `vercel.json`: region `sin1`, `installCommand: npm ci --ignore-scripts` (onnxruntime-node's install script times out on Vercel; the app only uses the browser runtime)
+- `.vercelignore`: **keeps `SAREES/` (Mom's private photos), `.env*`, `node_modules` out of CLI uploads**. The Vercel CLI does not read `.gitignore`.
 - `public/`: icons (`icon.svg` is the source; PNGs were generated with ImageMagick)
 
-Commands: `npm run dev`, `npm run build`, `npm run preview`, `npm run lint`, `npm test`.
+Commands: `npm run build`, `npm run lint`, `npm test`, `npx tsc -b` (app + api + scripts). Local env: `vercel env pull .env.local`. Deploy: `git push` (or `vercel deploy --prod` from this folder; **never the dashboard "Redeploy" button**, which rebuilds the previous upload, not the latest code).
 
 ## Conventions
 - **Design system (D16):** use the tokens in `index.css` (`--brand`, `--gold`, `--surface-2`, `--shadow-*`, `--radius*`) and **lucide-react** icons only. Never use emoji in the UI, never call native `window.prompt/confirm/alert` (use `useDialog()`), and use `.card`, `.row`, `.btn-primary/-quiet/-dashed` instead of one-off styles.
 - Uppercase and letter-spacing go **only under `:lang(en)`**, because tracking breaks Gujarati conjuncts.
-- Show stored photos with `<Photo cacheKey={photoKey(saree, i)}>` so object URLs are reused across live-query refreshes.
+- Show photos with `<Photo photo={…}>`: a `StoredPhoto` uses `/api/photo` (browser-cached), a `Blob` uses an object URL preview.
+- **Saree names are unique per language** (DB indexes on `lower(title)` and `lower(title_en)`); the form shows `nameTaken` on 409.
+- **Gujarati text uses pure Gujarati words** (કિનાર, છાપ, રેશમી, પટોળું…), not English transliterated into Gujarati.
+- `SAREES/` holds Mom's original photos: git-ignored and Vercel-ignored. Never commit or upload it; only view it with the user's permission.
 - Mobile-first. Test at a 360px width. Base font ≥ 18px, tap targets ≥ 48px.
 - Compress every photo to **JPEG 0.85** at ≤ 1280px on the long edge before storing it (D23 replaced WebP).
 - Screens that only need place names use `useLocations()`, not `useData()` (which loads every saree).
@@ -69,7 +89,7 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 - *Why:* one codebase works on Android and iOS, there are no Play Store/App Store fees (the Apple developer account is $99/yr), updates ship instantly, and it can be hosted for free.
 - *Rejected:* native Android/Flutter (store hassle, iOS costs money); a Google Sheets/Notion-only setup (no proper photo-first UI, weak NL search).
 
-**D2 · 2026-10-25 · Keep the data on the device (IndexedDB), with no cloud database**
+**D2 · 2026-10-25 · Keep the data on the device (IndexedDB), with no cloud database (superseded by D24)**
 - *Why:* free tiers are what threaten "free for life." Supabase pauses idle projects, Firebase Storage now needs the paid Blaze plan, Cloudflare R2 needs a card on file, and Render/Railway free tiers have been cut before. Data on the phone costs nothing, works offline, and stays private.
 - *Rejected:* Supabase, Firebase, MongoDB Atlas, Cloudflare D1/R2 (each one is a dependency whose terms could change or that needs a card).
 
@@ -81,14 +101,14 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 **D4 · 2026-10-25 · Use the multilingual embedding model (`multilingual-e5-small`)**
 - *Why:* Mom may type or speak in Hindi or Gujarati. An English-only MiniLM would miss those queries. The extra size is acceptable.
 
-**D5 · 2026-10-25 · Back up to mom's own Google Drive (`appDataFolder`), with manual zip export as a fallback**
+**D5 · 2026-10-25 · Back up to mom's own Google Drive (`appDataFolder`), with manual zip export as a fallback (superseded by D24)**
 - *Why:* every Google account comes with 15 GB free that doesn't expire, there is no server for us to run, OAuth happens on the client side, and the data belongs to her. 1,000 sarees × 150 KB ≈ 150 MB, which fits easily. The zip export means we don't depend on Google either.
 - *Rejected:* our own sync server (costs money and needs upkeep), GitHub as storage (not suitable for photos or for mom).
 
 **D6 · 2026-10-25 · Use a three-level location tree (Room → Unit → Spot) plus an "away" kind**
 - *Why:* this matches how she thinks ("bedroom almirah, top shelf"). The "away" kind covers sarees at the tailor, at the dry cleaner, or lent to someone. QR labels go on the units.
 
-**D7 · 2026-10-25 · Host on Cloudflare Pages or GitHub Pages**
+**D7 · 2026-10-25 · Host on Cloudflare Pages or GitHub Pages (superseded by D24)**
 - *Why:* both host static sites for free with HTTPS, which PWAs and camera access require. Because the app is plain static files, moving to another host is trivial if one of them changes its terms.
 
 **D8 · 2026-10-25 · Target Android with Chrome as the primary platform**
@@ -102,7 +122,7 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 **D10 · 2026-10-25 · Single user only, so no family sharing for now**
 - *Why:* only Mom will use it. There are no accounts, roles or shared Drive folder, and Drive backup goes to her account alone. Family sharing moves out of Phase 4 into the Backlog.
 
-**D11 · 2026-10-25 · Use GitHub Pages through GitHub Actions as the default deploy, with a public repo**
+**D11 · 2026-10-25 · Use GitHub Pages through GitHub Actions as the default deploy, with a public repo (superseded by D24)**
 - *Why:* the deploy setup lives in the repo (`.github/workflows/deploy.yml`) and there's no extra account beyond GitHub. Pages is free for public repos, and the repo holds no personal data because Mom's data lives only on her phone. `BASE_PATH` handles the `/<repo>/` sub-path, so moving to Cloudflare Pages at `/` needs no code change.
 - *Rejected for now:* Cloudflare Pages (just as good, but needs a second account; it remains the fallback, and README has the steps).
 
@@ -172,6 +192,21 @@ Format: **D# · date · decision**, then *Why* and *Rejected alternatives*.
 - *Why:* free, built into Chrome on Android, supports `gu-IN`. The language follows the ગુ/EN switch. Interim results show words as she speaks.
 - *Limits:* Chrome sends audio to Google's recogniser, so **voice needs internet** (typed search works offline). The mic button is hidden on browsers without support. Errors show plain-language messages (mic not allowed / no internet / didn't hear).
 
+**D24 · 2026-10-25 · Moved from on-phone storage to the cloud on Vercel (user's decision): Neon Postgres + private Vercel Blob + login**
+- *Why:* the user wanted a shared "universal database" for Mom and the family, safe if a phone is lost. Supersedes D2 (on-phone IndexedDB), D5 (Drive backup), D7/D11 (static hosting on GitHub Pages) and constraint 4 (offline first).
+- *User's choices:* **cloud only** (no offline copy); **login ID + password created by us**, remembered "forever" until Sign out, single family now but more users with one command; **Mom + family** share all data (to separate families later, add `family_id`).
+- *Free-tier fit (checked in official docs):* Blob Hobby 1 GB storage, 2,000 uploads/month, 10 GB transfer/month (**over the limit = Blob locked for 30 days, never billed**); Neon free 1 GB, 100 CU-h/month, no card, no expiry, never deletes data. Hobby limits are **shared across the account's other projects** (portfolio, grow-physio…). Photos are compressed to about 200–300 KB, so 1 GB ≈ 3,000+ photos.
+- *Design:* kept the Vite SPA plus `api/` functions (no Next.js rewrite). Server uploads through `/api/photo` (simpler than client-token uploads for a private store; photos are well under the 4.5 MB body limit). Photo-AI fingerprints are stored per photo in Postgres (`real[]`) and shared by the family. History is written server-side.
+- *Setup:* `vercel link` → `vercel integration add neon --plan free_v3 -m region=sin1` → `vercel blob create-store outfit-photos --access private --region sin1` → `SESSION_SECRET` (random, sensitive) → `vercel git connect` (needed the Vercel GitHub App to be given access to the repo).
+- *Incidents:* (1) the first CLI deploy started uploading `SAREES/` (762 MB) because the CLI ignores `.gitignore`; it failed mid-upload with no deployment created, and `.vercelignore` was added. (2) `npm install` failed on Vercel (onnxruntime-node install script timeout), fixed with `--ignore-scripts`. (3) A dashboard "Redeploy" rebuilt old source; use `git push`.
+
+**D25 · 2026-10-25 · First bulk data: 63 photos imported, reviewed by eye, named in Gujarati and English**
+- `import-photos` imported Mom's 63 photos (797 MB of 48 MP originals → 11 MB) into Kavya Room › Kavya Bed as "1 photo = 1 saree", per the user. All showed the same fallback name.
+- *AI naming attempt:* MobileCLIP zero-shot gets the **main colour right 15/15** on labelled Commons photos, but **design/fabric guesses are unreliable** (only trustworthy at softmax ≥ 0.55, and then rarely fires). Colour-only names collided heavily (12 × "Blue"). Group shots fooled it.
+- *Review (with the user's permission):* looked at all 63 thumbnails. **44 distinct sarees, 17 overview shots** (drawer/cabinet/bag of many sarees) and **2 duplicates**. The 19 non-sarees were deleted with their photos. The photos show two storage spots (a grey-lined suitcase, #1–35; a wooden drawer with saree bags, #37–63); a place split was offered but not done yet.
+- *Names:* user asked for **unique, good descriptions in pure Gujarati**, then **separate English names**. Added `title_en`; the app shows the name for the current language, falling back to the other. Unique per language, enforced in the DB. Tags (colours/design/fabric) were set from the review so word search works; fingerprints were stored for photo search.
+- *Thumbnails* were made only in the session scratchpad and deleted afterwards.
+
 ## Testing
 - An end-to-end Playwright script (kept outside the repo, in the session scratchpad) covers: the empty state, the place tree through bottom sheets, adding with photo and place, the missing-place error, batch-keep place, search (EN, GU, notes, place), move + history, last worn, the back button, edit, place counts, delete protection, rename, backup → wipe → restore, and **no native dialogs or console errors**. **33/33 pass** against the dev server on the redesigned UI (twice in a row).
 - Mobile check (Pixel 7 emulation at 320, 360 and 412px, 7 screens each): no horizontal overflow, no controls under 44px, base font 19px. Re-run after the redesign: all clean. It found and fixed a detail photo that pushed the place below the fold (now 42vh) and a gap between the save bar and the tab bar (`--tabbar-h` token).
@@ -186,14 +221,19 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 | Phase | Item | Status |
 |---|---|---|
 | Planning | Problem statement, architecture, decisions | ✅ |
-| 0 | Project scaffold, PWA, Dexie, theme, i18n, deploy workflow | ✅ live at https://anshbhimani.github.io/OUTFIT-LOCATOR/ |
+| 0 | Project scaffold, PWA, theme, i18n | ✅ (now on Vercel, D24) |
 | 1 | Locations, add/edit/move saree, browse, zip export | ✅ (tested in a desktop browser; still needs a try on Mom's phone) |
 | 2 | Smart search (synonyms, typos, GU↔Latin, related colours, places), voice (gu-IN/en-IN), eval set | ✅ (semantic model deferred, D20; needs real-phone voice test and Mom's real queries) |
 | 3 | Google Drive backup/restore, QR labels | ⬜ |
 | 4 | CLIP photo search ✅ (D22); auto-suggest tags from photo, "not worn" view | 🟨 |
-| Backlog | Family sharing (see D10) | ⬜ |
+| Cloud | Vercel + Neon + private Blob + login, family sharing (D24) | ✅ live at https://outfit-locator.vercel.app |
+| Data | First 44 sarees named GU/EN, tagged, fingerprinted (D25) | ✅ |
 
-## Open questions
+## Open questions / to do
+- **Change Mom's password**: the current one appeared in chat (`npm run create-user -- mom "Mummy"`).
+- **Retire the old GitHub Pages app** (Settings → Pages → Unpublish) once any sarees saved there have been moved over via backup → restore.
+- Offered, not yet decided: pure-Gujarati tag labels in `vocab.ts` (સિલ્ક→રેશમી, પ્રિન્ટ→છાપ, બોર્ડર→કિનાર…); split Kavya Bed into Suitcase / Drawer; hide password typing in `create-user`; review `npm audit` (4 high).
+- One saree added in the app has no name yet.
 - How many sarees? Unknown. Design for up to about 1,000 (≈150 MB of photos). Count them during the first bulk entry.
 - What model and age is Mom's Android phone? Check in Phase 2 whether the embedding model runs fast enough.
 
@@ -208,6 +248,7 @@ Status key: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-25:** Answered the open questions: Android, only Mom uses it, Gujarati + English, saree count unknown. Added D8–D10 and moved family sharing to the Backlog.
 - **2026-10-25:** Phase 0: scaffolded Vite + React + TS, added the PWA (manifest, service worker, icons), the Dexie schema, a GU/EN toggle, the large-text theme and the tab shell. Build and lint pass, and the production build serves `sw.js` and the manifest. Added the GitHub Pages workflow (D11) and ran `git init` (no commits yet). Next: create the GitHub repo, push, enable Pages, install on Mom's phone, then Phase 1.
 - **2026-10-25:** Phase 1 built: place tree (room → cupboard/box → shelf, plus outside places), add/edit saree with camera or gallery photos (compressed), tag chips, batch entry, detail view (move, wore today, history, delete), interim search, zip backup/restore. Decisions D13–D15. E2E: 34/34 pass. Next: deploy and let Mom try it, then Phase 2 (smart search).
+- **2026-10-25:** Moved to Vercel cloud (D24): Neon, private Blob, login, family sharing; live and Git-connected. Imported Mom's 63 photos, reviewed them by eye (44 sarees, 19 non-sarees removed), named in pure Gujarati and English with unique-name rules, tagged and fingerprinted (D25).
 - **2026-10-25:** Save-speed fix (D23) after Mom reported slow saving; Vercel considered and not needed (saving is local). All suites pass: 33/33 core, 15/15 search, 9/9 photo-AI, 11/11 unit, mobile clean.
 - **2026-10-25:** Photo AI search (D22): MobileCLIP-S0 picked and calibrated on real saree photos (the q8 vision model rejected as near-random), opt-in download about 90 MB, background learning, "Found by photo" section, offline verified. Next: Mom tries Phase 2 + photo AI on her phone; then decide Drive backup (Phase 3).
 - **2026-10-25:** Phase 2: custom search engine (D19), voice search (D21), Vitest eval at 43/43 top-3 and ~14 ms per query at 1,000 sarees. Semantic model deferred (D20). Next: collect Mom's real searches, add misses to the eval, then decide Phase 3 (Drive backup) vs D20.

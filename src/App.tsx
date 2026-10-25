@@ -1,14 +1,15 @@
-import { ChevronLeft, House, Plus, Search } from 'lucide-react'
+import { ChevronLeft, House, LoaderCircle, Plus, Search, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { photoAi } from './ai/photoAi'
 import { BrandMark } from './components/icons'
-import { requestPersistentStorage } from './db'
 import { useLang } from './i18n'
 import type { Nav, Screen } from './nav'
+import { LoginScreen } from './screens/LoginScreen'
 import { PlacesScreen } from './screens/PlacesScreen'
 import { SareeDetail } from './screens/SareeDetail'
 import { SareeForm } from './screens/SareeForm'
 import { SearchScreen } from './screens/SearchScreen'
+import { loadAll, useStore } from './store'
 
 type Tab = 'search' | 'add' | 'places'
 const TAB_ROOT: Record<Tab, Screen> = {
@@ -20,12 +21,15 @@ const TAB_ROOT: Record<Tab, Screen> = {
 export default function App() {
   const { t, lang, toggle } = useLang()
   const [stack, setStack] = useState<Screen[]>([TAB_ROOT.search])
-  const [persisted, setPersisted] = useState<boolean | null>(null)
+  const { status } = useStore()
 
   useEffect(() => {
-    requestPersistentStorage().then(setPersisted)
-    photoAi.resume() // reloads the photo AI from the browser cache if Mom turned it on
+    void loadAll() // shows the login screen instead if this phone isn't signed in
   }, [])
+
+  useEffect(() => {
+    if (status === 'ready') photoAi.resume() // reloads the photo AI from the browser cache if it was turned on
+  }, [status])
 
   // Each pushed screen gets a browser history entry so Android's back button goes back one screen.
   useEffect(() => {
@@ -78,32 +82,47 @@ export default function App() {
       </header>
 
       <main className="content">
-        {persisted === false && stack.length === 1 && root.name === 'search' && (
-          <p className="banner">{t.storageAtRisk}</p>
+        {status === 'signedOut' && <LoginScreen />}
+        {status === 'loading' && (
+          <div className="status-screen">
+            <LoaderCircle size={36} className="spin" aria-hidden />
+            <p>{t.loading}</p>
+          </div>
         )}
-        {screen.name === 'search' && <SearchScreen nav={nav} onAdd={() => switchTab('add')} />}
-        {screen.name === 'add' && <SareeForm nav={nav} />}
-        {screen.name === 'edit' && <SareeForm key={screen.id} id={screen.id} nav={nav} />}
-        {screen.name === 'saree' && <SareeDetail key={screen.id} id={screen.id} nav={nav} />}
-        {screen.name === 'places' && <PlacesScreen key={screen.locationId} locationId={screen.locationId} nav={nav} />}
+        {status === 'offline' && (
+          <div className="status-screen">
+            <WifiOff size={40} aria-hidden />
+            <p>{t.noInternet}</p>
+            <button className="btn btn-primary" onClick={() => void loadAll()}>
+              {t.retry}
+            </button>
+          </div>
+        )}
+        {status === 'ready' && screen.name === 'search' && <SearchScreen nav={nav} onAdd={() => switchTab('add')} />}
+        {status === 'ready' && screen.name === 'add' && <SareeForm nav={nav} />}
+        {status === 'ready' && screen.name === 'edit' && <SareeForm key={screen.id} id={screen.id} nav={nav} />}
+        {status === 'ready' && screen.name === 'saree' && <SareeDetail key={screen.id} id={screen.id} nav={nav} />}
+        {status === 'ready' && screen.name === 'places' && <PlacesScreen key={screen.locationId} locationId={screen.locationId} nav={nav} />}
       </main>
 
-      <nav className="tabbar">
-        <button className={activeTab === 'search' ? 'active' : ''} onClick={() => switchTab('search')}>
-          <Search size={26} aria-hidden />
-          {t.tabSearch}
-        </button>
-        <button className={activeTab === 'add' ? 'tab-add active' : 'tab-add'} onClick={() => switchTab('add')}>
-          <span className="tab-add-circle">
-            <Plus size={30} strokeWidth={2.5} aria-hidden />
-          </span>
-          {t.tabAdd}
-        </button>
-        <button className={activeTab === 'places' ? 'active' : ''} onClick={() => switchTab('places')}>
-          <House size={26} aria-hidden />
-          {t.tabPlaces}
-        </button>
-      </nav>
+      {status === 'ready' && (
+        <nav className="tabbar">
+          <button className={activeTab === 'search' ? 'active' : ''} onClick={() => switchTab('search')}>
+            <Search size={26} aria-hidden />
+            {t.tabSearch}
+          </button>
+          <button className={activeTab === 'add' ? 'tab-add active' : 'tab-add'} onClick={() => switchTab('add')}>
+            <span className="tab-add-circle">
+              <Plus size={30} strokeWidth={2.5} aria-hidden />
+            </span>
+            {t.tabAdd}
+          </button>
+          <button className={activeTab === 'places' ? 'active' : ''} onClick={() => switchTab('places')}>
+            <House size={26} aria-hidden />
+            {t.tabPlaces}
+          </button>
+        </nav>
+      )}
     </div>
   )
 }

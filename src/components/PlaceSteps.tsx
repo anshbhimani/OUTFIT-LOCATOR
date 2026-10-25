@@ -1,4 +1,4 @@
-import type { Location } from '../db'
+import type { Location } from '../types'
 import { locationPath } from '../data'
 import { KIND_ICON } from './icons'
 

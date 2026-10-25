@@ -1,13 +1,13 @@
-import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowRightLeft, CalendarCheck, History, Pencil, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useDialog } from '../components/Dialog'
 import { LocationPicker } from '../components/LocationPicker'
 import { PlaceSteps } from '../components/PlaceSteps'
 import { Photo } from '../components/SareeCard'
-import { db } from '../db'
-import { deleteSaree, markWorn, moveSaree, pathText } from '../data'
-import { photoKey, useLocations } from '../hooks'
+import { deleteSaree, getHistory, markWorn, moveSaree, pathText } from '../data'
+import { useLocations } from '../hooks'
+import { useStore } from '../store'
+import type { HistoryEntry } from '../types'
 import { useLang } from '../i18n'
 import type { Nav } from '../nav'
 import { sareeName, termLabel } from '../vocab'
@@ -16,8 +16,18 @@ export function SareeDetail({ id, nav }: { id: string; nav: Nav }) {
   const { t, lang } = useLang()
   const dialog = useDialog()
   const { byId } = useLocations()
-  const saree = useLiveQuery(() => db.sarees.get(id), [id])
-  const history = useLiveQuery(() => db.history.where('sareeId').equals(id).reverse().sortBy('at'), [id])
+  const saree = useStore().sarees.find((s) => s.id === id)
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null)
+  const updatedAt = saree?.updatedAt.getTime()
+  useEffect(() => {
+    let cancelled = false
+    getHistory(id)
+      .then((h) => !cancelled && setHistory(h))
+      .catch(() => undefined) // history is a nice-to-have; the rest of the screen still works
+    return () => {
+      cancelled = true
+    }
+  }, [id, updatedAt])
   const [moving, setMoving] = useState(false)
   const [photoIndex, setPhotoIndex] = useState(0)
 
@@ -47,8 +57,8 @@ export function SareeDetail({ id, nav }: { id: string; nav: Nav }) {
         }}
       >
         {saree.photos.length === 0 && <Photo alt="" className="carousel-photo" />}
-        {saree.photos.map((p, i) => (
-          <Photo key={i} blob={p} cacheKey={photoKey(saree, i)} alt={sareeName(saree, lang)} className="carousel-photo" />
+        {saree.photos.map((p) => (
+          <Photo key={p.id} photo={p} alt={sareeName(saree, lang)} className="carousel-photo" />
         ))}
       </div>
       {saree.photos.length > 1 && (

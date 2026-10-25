@@ -32,6 +32,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The API (data, photos, login) always goes to the network; never answered from the app cache.
+        navigateFallbackDenylist: [/^\/api\//],
         // Photo-AI code (worker + 27 MB WebAssembly runtime) is only fetched once Mom turns the
         // feature on, then kept for offline use. Model weights are cached by transformers.js itself.
         globIgnores: ['**/worker-*.js'],

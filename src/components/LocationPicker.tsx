@@ -1,6 +1,6 @@
 import { Check, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { useState } from 'react'
-import type { Location } from '../db'
+import type { Location } from '../types'
 import { CHILD_KIND, locationPath } from '../data'
 import { useData } from '../hooks'
 import { useLang } from '../i18n'

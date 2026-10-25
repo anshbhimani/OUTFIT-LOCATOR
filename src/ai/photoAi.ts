@@ -1,8 +1,9 @@
 // Photo-AI manager: opt-in download, background "learning" of every saree photo, and text
 // queries. One instance for the whole app; React reads it through usePhotoAi().
-import { liveQuery } from 'dexie'
 import { useSyncExternalStore } from 'react'
-import { db } from '../db'
+import { setPhotoEmbedding } from '../data'
+import { getState as getData, loadAll, subscribe as subscribeData } from '../store'
+import { photoUrl, type Saree } from '../types'
 import type { WorkerRequest, WorkerResponse } from './worker'
 
 export type AiStatus = 'off' | 'loading' | 'ready' | 'error'
@@ -11,7 +12,7 @@ export interface AiState {
   status: AiStatus
   /** Download progress 0–100 while loading. */
   progress: number
-  /** Sarees with photos that the AI has learned, out of all sarees with photos. */
+  /** Sarees whose photos the AI has learned (by any family phone), out of all sarees with photos. */
   learned: number
   total: number
 }
@@ -30,7 +31,7 @@ const setState = (patch: Partial<AiState>) => {
 let worker: Worker | null = null
 let nextId = 1
 const pending = new Map<number, { resolve: (v?: Float32Array) => void; reject: (e: Error) => void }>()
-let indexSub: { unsubscribe(): void } | null = null
+let unwatch: (() => void) | null = null
 let indexing = false
 const textCache = new Map<string, Float32Array>()
 
@@ -68,28 +69,30 @@ async function start() {
   try {
     await call({ type: 'load' })
     setState({ status: 'ready', progress: 100 })
-    watchIndex()
+    await watchIndex()
   } catch {
     setState({ status: 'error' })
   }
 }
 
-/** Re-learn whenever sarees without fingerprints appear (new, edited, or restored from backup). */
-function watchIndex() {
-  indexSub?.unsubscribe()
-  indexSub = liveQuery(async () => {
-    const withPhotos = await db.sarees.filter((s) => s.photos.length > 0).toArray()
-    return {
-      total: withPhotos.length,
-      todo: withPhotos.filter((s) => !s.imageEmbeddings).map((s) => s.id),
-    }
-  }).subscribe(({ total, todo }) => {
-    setState({ total, learned: total - todo.length })
-    if (todo.length) void learn()
-  })
+const unlearned = (s: Saree) => s.photos.some((p) => !p.hasEmbedding && !failed.has(p.id))
+
+/** Learn whenever sarees without fingerprints appear (new, edited, or restored from backup). */
+async function watchIndex() {
+  // Fingerprints are stored in the cloud; fetch them once so search can compare against them.
+  if (!getData().embeddingsLoaded) await loadAll(true)
+  const update = () => {
+    const withPhotos = getData().sarees.filter((s) => s.photos.length > 0)
+    const todo = withPhotos.filter(unlearned).length
+    setState({ total: withPhotos.length, learned: withPhotos.length - todo })
+    if (todo) void learn()
+  }
+  unwatch?.()
+  unwatch = subscribeData(update)
+  update()
 }
 
-/** Sarees whose photos couldn't be processed this session (skipped instead of retried forever). */
+/** Photos that couldn't be processed this session (skipped instead of retried forever). */
 const failed = new Set<string>()
 
 /** Learning pauses until this time, so it doesn't compete with Mom adding sarees (D23). */
@@ -103,22 +106,17 @@ async function learn() {
   try {
     while (state.status === 'ready') {
       while (Date.now() < quietUntil) await sleep(quietUntil - Date.now())
-      const saree = await db.sarees
-        .filter((s) => s.photos.length > 0 && !s.imageEmbeddings && !failed.has(s.id))
-        .first()
+      const saree = getData().sarees.find(unlearned)
       if (!saree) break
+      const photo = saree.photos.find((p) => !p.hasEmbedding && !failed.has(p.id))!
       try {
-        const vecs: Float32Array[] = []
-        for (const photo of saree.photos) vecs.push((await call({ type: 'image', blob: photo }))!)
-        // Only save if the saree wasn't edited while we were working on it.
-        await db.transaction('rw', db.sarees, async () => {
-          const now = await db.sarees.get(saree.id)
-          if (now && now.updatedAt.getTime() === saree.updatedAt.getTime()) {
-            await db.sarees.update(saree.id, { imageEmbeddings: vecs })
-          }
-        })
+        const res = await fetch(photoUrl(photo.pathname), { credentials: 'same-origin' })
+        if (!res.ok) throw new Error(`photo ${res.status}`)
+        const vec = (await call({ type: 'image', blob: await res.blob() }))!
+        // Saved per photo (photos never change content), shared with the whole family.
+        await setPhotoEmbedding(saree.id, photo.id, vec)
       } catch {
-        failed.add(saree.id)
+        failed.add(photo.id)
       }
     }
   } finally {
@@ -156,8 +154,8 @@ export const photoAi = {
     } catch {
       // ignore
     }
-    indexSub?.unsubscribe()
-    indexSub = null
+    unwatch?.()
+    unwatch = null
     worker?.terminate()
     worker = null
     pending.clear()
@@ -188,20 +186,18 @@ export function usePhotoAi(): AiState {
 }
 
 /** Best photo similarity per saree (cosine; vectors are pre-normalised). */
-export function photoSimilarities(
-  query: Float32Array,
-  sarees: { id: string; imageEmbeddings?: Float32Array[] }[],
-): Map<string, number> {
+export function photoSimilarities(query: Float32Array, sarees: Saree[]): Map<string, number> {
   const sims = new Map<string, number>()
   for (const s of sarees) {
-    if (!s.imageEmbeddings?.length) continue
-    let best = -1
-    for (const v of s.imageEmbeddings) {
+    let best = -2
+    for (const p of s.photos) {
+      const v = p.embedding
+      if (!v) continue
       let d = 0
       for (let i = 0; i < v.length; i++) d += v[i] * query[i]
       best = Math.max(best, d)
     }
-    sims.set(s.id, best)
+    if (best > -2) sims.set(s.id, best)
   }
   return sims
 }

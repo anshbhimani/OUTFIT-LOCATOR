@@ -1,22 +1,14 @@
 import { ImageOff, MapPin } from 'lucide-react'
-import type { Location, Saree } from '../db'
+import { photoUrl, type Location, type Saree, type StoredPhoto } from '../types'
 import { locationPath } from '../data'
-import { photoKey, useObjectUrl } from '../hooks'
+import { useObjectUrl } from '../hooks'
 import { useLang } from '../i18n'
 import { sareeName } from '../vocab'
 
-export function Photo({
-  blob,
-  cacheKey,
-  alt,
-  className,
-}: {
-  blob?: Blob
-  cacheKey?: string
-  alt: string
-  className?: string
-}) {
-  const url = useObjectUrl(blob, cacheKey)
+/** A saved photo (served by /api/photo, cached by the browser) or a new, not-yet-saved one (Blob). */
+export function Photo({ photo, alt, className }: { photo?: Blob | StoredPhoto; alt: string; className?: string }) {
+  const previewUrl = useObjectUrl(photo instanceof Blob ? photo : undefined)
+  const url = photo instanceof Blob ? previewUrl : photo && photoUrl(photo.pathname)
   if (!url)
     return (
       <div className={`photo-placeholder ${className ?? ''}`}>
@@ -48,7 +40,7 @@ export function SareeGrid({
         return (
           <li key={s.id}>
             <button className="saree-card" onClick={() => onOpen(s.id)}>
-              <Photo blob={s.photos[0]} cacheKey={photoKey(s, 0)} alt={name} className="saree-card-photo" />
+              <Photo photo={s.photos[0]} alt={name} className="saree-card-photo" />
               <span className="saree-card-body">
                 <span className="saree-card-name">{name}</span>
                 <span className="saree-card-place">

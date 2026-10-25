@@ -1,5 +1,5 @@
 import { Archive, DoorOpen, Layers, MapPinned, type LucideIcon } from 'lucide-react'
-import type { LocationKind } from '../db'
+import type { LocationKind } from '../types'
 
 // eslint-disable-next-line react/only-export-components
 export const KIND_ICON: Record<LocationKind, LucideIcon> = {

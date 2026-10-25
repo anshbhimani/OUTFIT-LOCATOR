@@ -1,4 +1,4 @@
-import { ChevronRight, Download, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { ChevronRight, CloudCheck, Download, LogOut, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createBackup, lastBackupAt, restoreBackup, saveBackup } from '../backup'
 import { AiSettings } from '../components/AiCard'
@@ -6,10 +6,11 @@ import { useDialog } from '../components/Dialog'
 import { KIND_ICON } from '../components/icons'
 import { addLabel, promptAddPlace } from '../components/places'
 import { SareeGrid } from '../components/SareeCard'
-import type { Location } from '../db'
+import type { Location } from '../types'
 import { CHILD_KIND, deleteLocation, locationPath, renameLocation, subtreeIds } from '../data'
 import { useData } from '../hooks'
 import { useLang } from '../i18n'
+import { logout, useStore } from '../store'
 import type { Nav } from '../nav'
 
 /** `locationId` null = top level (rooms, outside places, backup). Otherwise one place and what's inside it. */
@@ -72,6 +73,7 @@ export function PlacesScreen({ locationId, nav }: { locationId: string | null; n
 
         <BackupSection />
         <AiSettings />
+        <AccountSection />
       </section>
     )
   }
@@ -132,6 +134,7 @@ function BackupSection() {
   const { t, lang } = useLang()
   const dialog = useDialog()
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [last, setLast] = useState(lastBackupAt)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -151,22 +154,27 @@ function BackupSection() {
     if (!file || !(await dialog.confirm(t.importBackup, { message: t.importConfirm, danger: true }))) return
     setBusy(true)
     try {
-      await dialog.alert(t.importDone(await restoreBackup(file)))
+      await dialog.alert(t.importDone(await restoreBackup(file, (done, total) => setProgress({ done, total }))))
     } catch {
       await dialog.alert(t.importFailed)
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
   return (
     <div className="card backup">
       <h2 className="card-title">{t.backup}</h2>
-      <p className={last ? 'backup-status ok' : 'backup-status warn'}>
-        {last ? <ShieldCheck size={22} aria-hidden /> : <ShieldAlert size={22} aria-hidden />}
-        {last ? t.lastBackup(last.toLocaleDateString(lang === 'gu' ? 'gu-IN' : 'en-IN')) : t.neverBackedUp}
+      <p className="backup-status ok">
+        <CloudCheck size={22} aria-hidden />
+        {t.savedOnline}
       </p>
-      <p className="hint">{t.backupHint}</p>
+      <p className="hint">
+        {t.backupHint}
+        {last && <> {t.lastBackup(last.toLocaleDateString(lang === 'gu' ? 'gu-IN' : 'en-IN'))}</>}
+      </p>
+      {progress && <p className="hint">{t.restoring(progress.done, progress.total)}</p>}
       <button className="btn btn-primary wide" onClick={exportNow} disabled={busy}>
         <Download size={22} aria-hidden />
         {t.exportBackup}
@@ -176,6 +184,28 @@ function BackupSection() {
         {t.importBackup}
       </button>
       <input ref={fileRef} type="file" accept=".zip,application/zip" hidden onChange={onRestore} />
+    </div>
+  )
+}
+
+function AccountSection() {
+  const { t } = useLang()
+  const dialog = useDialog()
+  const { user } = useStore()
+  if (!user) return null
+  return (
+    <div className="card">
+      <h2 className="card-title">{t.account}</h2>
+      <p className="account-name">{t.signedInAs(user.displayName)}</p>
+      <button
+        className="btn btn-quiet wide"
+        onClick={async () => {
+          if (await dialog.confirm(t.signOut, { message: t.signOutConfirm, confirmLabel: t.signOut })) await logout()
+        }}
+      >
+        <LogOut size={22} aria-hidden />
+        {t.signOut}
+      </button>
     </div>
   )
 }

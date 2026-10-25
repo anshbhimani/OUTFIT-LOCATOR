@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Mom's real saree photos: private, never commit (repo is public)
+SAREES/
+.vercel
+.env*

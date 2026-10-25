@@ -6,9 +6,9 @@ import { useDialog } from '../components/Dialog'
 import { LocationPicker } from '../components/LocationPicker'
 import { PlaceSteps } from '../components/PlaceSteps'
 import { Photo } from '../components/SareeCard'
-import { db } from '../db'
-import { addSaree, updateSaree, type SareeInput } from '../data'
+import { addSaree, discardUpload, startUpload, updateSaree, type SareeInput } from '../data'
 import { getLastLocation, setLastLocation, useLocations } from '../hooks'
+import { ApiError, getState } from '../store'
 import { useLang } from '../i18n'
 import type { Nav } from '../nav'
 import { compressPhoto } from '../photos'
@@ -21,6 +21,7 @@ const AI_QUIET_MS = 20_000
 const empty = (locationId: string): SareeInput => ({
   photos: [],
   title: '',
+  titleEn: '',
   colors: [],
   fabric: undefined,
   pattern: undefined,
@@ -34,7 +35,11 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
   const { t } = useLang()
   const dialog = useDialog()
   const { byId, loading } = useLocations()
-  const [form, setFormState] = useState<SareeInput | null>(id ? null : empty(getLastLocation() ?? ''))
+  const [form, setFormState] = useState<SareeInput | null>(() => {
+    if (!id) return empty(getLastLocation() ?? '')
+    const s = getState().sarees.find((x) => x.id === id)
+    return s ? { ...s } : null
+  })
   // Mirrors `form` synchronously, so a save waiting on photo preparation sees the finished photos.
   const formRef = useRef(form)
   const setForm = (next: SareeInput | null | ((f: SareeInput | null) => SareeInput | null)) => {
@@ -52,13 +57,7 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
 
   useEffect(() => {
     photoAi.holdOff(AI_QUIET_MS)
-    if (!id) return
-    db.sarees.get(id).then((s) => {
-      if (s) setForm({ ...s })
-    })
-    // setForm is stable in behaviour (writes the ref + state); re-running on its identity is unwanted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [])
 
   if (!form || loading) return null
   // A remembered place may have been deleted since.
@@ -73,7 +72,10 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
     for (const file of files) {
       setPreparing((n) => n + 1)
       const job = compressPhoto(file)
-        .then((blob) => setForm((f) => (f ? { ...f, photos: [...f.photos, blob] } : f)))
+        .then((blob) => {
+          void startUpload(blob).catch(() => undefined) // upload now; Save retries if this fails
+          setForm((f) => (f ? { ...f, photos: [...f.photos, blob] } : f))
+        })
         .catch(() => undefined)
         .finally(() => {
           pendingRef.current.delete(job)
@@ -98,17 +100,23 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
         ...current,
         locationId,
         title: current.title?.trim() || undefined,
+        titleEn: current.titleEn?.trim() || undefined,
         notes: current.notes?.trim() || undefined,
       }
       setLastLocation(locationId)
-      if (id) {
-        await updateSaree(id, input)
-        nav.back()
-      } else {
-        await addSaree(input)
-        setForm(empty(locationId))
-        dialog.toast(t.saved)
-        window.scrollTo({ top: 0, behavior: 'smooth' })
+      try {
+        if (id) {
+          await updateSaree(id, input)
+          nav.back()
+        } else {
+          await addSaree(input)
+          setForm(empty(locationId))
+          dialog.toast(t.saved)
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      } catch (e) {
+        // Nothing is lost: the form keeps everything, so she can fix it and tap Save again.
+        await dialog.alert(e instanceof ApiError && e.code === 'duplicate_name' ? t.nameTaken : t.saveFailed)
       }
     } finally {
       setSaving(false)
@@ -141,13 +149,16 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
           <>
             <div className="photo-strip">
               {form.photos.map((p, i) => (
-                <div className="photo-thumb" key={i}>
-                  <Photo blob={p} alt="" />
+                <div className="photo-thumb" key={p instanceof Blob ? `new${i}` : p.id}>
+                  <Photo photo={p} alt="" />
                   <button
                     type="button"
                     className="photo-remove"
                     aria-label={t.removePhoto}
-                    onClick={() => set({ photos: form.photos.filter((_, j) => j !== i) })}
+                    onClick={() => {
+                      if (p instanceof Blob) discardUpload(p)
+                      set({ photos: form.photos.filter((_, j) => j !== i) })
+                    }}
                   >
                     <X size={20} strokeWidth={3} aria-hidden />
                   </button>
@@ -214,12 +225,23 @@ export function SareeForm({ id, nav }: { id?: string; nav: Nav }) {
         />
 
         <label className="field">
-          <span className="field-label">{t.title}</span>
+          <span className="field-label">{t.titleGu}</span>
           <input
             className="input"
+            lang="gu"
             value={form.title ?? ''}
-            placeholder={t.titleHint}
+            placeholder={t.titleGuHint}
             onChange={(e) => set({ title: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">{t.titleEn}</span>
+          <input
+            className="input"
+            lang="en"
+            value={form.titleEn ?? ''}
+            placeholder={t.titleEnHint}
+            onChange={(e) => set({ titleEn: e.target.value })}
           />
         </label>
         <label className="field">

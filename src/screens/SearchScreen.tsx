@@ -27,7 +27,7 @@ export function SearchScreen({ nav, onAdd }: { nav: Nav; onAdd: () => void }) {
       buildIndex(
         sarees.map((s) => ({
           id: s.id,
-          title: s.title,
+          title: [s.title, s.titleEn].filter(Boolean).join(' '),
           notes: s.notes,
           colors: s.colors,
           fabric: s.fabric,

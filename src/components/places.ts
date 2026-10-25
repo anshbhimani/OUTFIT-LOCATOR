@@ -1,4 +1,4 @@
-import type { LocationKind } from '../db'
+import type { LocationKind } from '../types'
 import { addLocation } from '../data'
 import type { Strings } from '../strings'
 import type { DialogApi } from './Dialog'

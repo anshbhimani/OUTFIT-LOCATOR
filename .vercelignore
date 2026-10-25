@@ -1,0 +1,10 @@
+# Never upload Mom's private photos or local secrets to Vercel (the CLI ignores .gitignore).
+SAREES/
+.env*
+node_modules/
+dist/
+.vercel/
+*.log
+.agents/
+.claude/
+skills-lock.json

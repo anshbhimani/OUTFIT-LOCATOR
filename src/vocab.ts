@@ -1,6 +1,6 @@
 // Tag vocabulary. Sarees store the English `key`; labels are shown in the current language.
 // Phase 2's synonym dictionary will extend these terms (Gujarati in English letters, etc.).
-import type { Saree } from './db'
+import type { Saree } from './types'
 import type { Lang } from './strings'
 
 export interface Term {
@@ -80,9 +80,11 @@ export function termAllLabels(key: string | undefined): string {
   return t ? `${t.key} ${t.en} ${t.gu}` : key
 }
 
-/** Display name: the given title, or a description built from tags. */
+/** Display name: the name in the chosen language, else the other language's, else built from tags. */
 export function sareeName(s: Saree, lang: Lang): string {
-  if (s.title) return s.title
+  const own = lang === 'en' ? s.titleEn : s.title
+  const other = lang === 'en' ? s.title : s.titleEn
+  if (own || other) return (own || other)!
   const parts = [...s.colors.slice(0, 2).map((c) => termLabel(c, lang)), termLabel(s.fabric, lang)].filter(Boolean)
   return parts.join(' ') || (lang === 'gu' ? 'સાડી' : 'Saree')
 }
